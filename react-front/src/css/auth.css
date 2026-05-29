@@ -1,0 +1,529 @@
+.auth-page {
+  align-items: center;
+  background: #f4f7f5;
+  display: grid;
+  min-height: 100vh;
+  padding: 40px 16px;
+}
+
+.auth-card {
+  border: 1px solid #dbe4df;
+  border-radius: 8px;
+  box-shadow: 0 18px 55px rgba(21, 32, 28, 0.1);
+  margin: 0 auto;
+  overflow: hidden;
+  width: min(940px, 100%);
+}
+
+.auth-card--split {
+  display: grid;
+  grid-template-columns: 0.95fr 1.05fr;
+}
+
+.auth-card--single {
+  padding: 36px;
+  width: min(560px, 100%);
+}
+
+.auth-hero {
+  background: #15201c;
+  color: #ffffff;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 560px;
+  padding: 32px;
+}
+
+.auth-brand {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+}
+
+.auth-brand__mark {
+  align-items: center;
+  background: #b8e15d;
+  border-radius: 8px;
+  color: #15201c;
+  display: grid;
+  font-weight: 900;
+  height: 38px;
+  justify-items: center;
+  place-items: center;
+  width: 38px;
+}
+
+.auth-brand__mark--dark {
+  background: #15201c;
+  color: #b8e15d;
+}
+
+.auth-brand__name {
+  font-weight: 900;
+}
+
+.auth-hero__content {
+  margin-top: 32px;
+}
+
+.auth-hero__title {
+  margin-bottom: 16px;
+}
+
+.auth-hero__body {
+  color: #cbd8d1;
+  line-height: 1.7;
+}
+
+.auth-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 32px;
+}
+
+.auth-chip {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 7px 12px;
+}
+
+.auth-form {
+  padding: 40px;
+}
+
+.auth-form__subtitle {
+  margin-top: 8px;
+}
+
+.auth-email-group {
+  display: grid;
+  gap: 12px;
+}
+
+.auth-email-row {
+  align-items: flex-start;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(150px, 0.75fr);
+}
+
+.auth-email-at {
+  color: #65716c;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 56px;
+}
+
+.auth-email-id,
+.auth-email-domain {
+  min-width: 0;
+}
+
+.password-strength {
+  display: grid;
+  gap: 7px;
+  margin-top: -6px;
+}
+
+.password-strength__header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.password-strength__label {
+  color: #15201c;
+  font-weight: 900;
+}
+
+.password-strength__track {
+  background: #dbe4df;
+  border-radius: 999px;
+  height: 8px;
+  overflow: hidden;
+}
+
+.password-strength__bar {
+  background: #94a3b8;
+  border-radius: inherit;
+  height: 100%;
+  transition: background-color 160ms ease, width 160ms ease;
+  width: 0;
+}
+
+.password-strength--weak .password-strength__bar {
+  background: #ef4444;
+  width: 25%;
+}
+
+.password-strength--normal .password-strength__bar {
+  background: #f59e0b;
+  width: 50%;
+}
+
+.password-strength--good .password-strength__bar {
+  background: #1f6f5b;
+  width: 75%;
+}
+
+.password-strength--safe .password-strength__bar {
+  background: #15803d;
+  width: 100%;
+}
+
+.auth-link {
+  font-weight: 900;
+}
+
+.auth-submit {
+  min-height: 44px;
+}
+
+@media (max-width: 760px) {
+  .auth-card--split {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-hero {
+    min-height: 260px;
+    padding: 24px;
+  }
+
+  .auth-form,
+  .auth-card--single {
+    padding: 24px;
+  }
+
+  .auth-email-row {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-email-at {
+    line-height: 1;
+    padding-left: 2px;
+  }
+}
+.MuiFormLabel-asterisk {
+  display: none;
+}
+
+
+.auth-page--x {
+  align-items: stretch;
+  background: #000000;
+  color: #ffffff;
+  padding: 0;
+}
+
+.auth-card--x {
+  background: #ffffff;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(420px, 0.85fr);
+  margin: 0;
+  min-height: 100vh;
+  width: 100%;
+}
+
+.auth-hero--x {
+  background: #000000;
+  border-right: 1px solid #2f3336;
+  color: #ffffff;
+  min-height: 100vh;
+  padding: clamp(40px, 7vw, 96px);
+}
+
+.auth-x-logo {
+  align-items: center;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  display: grid;
+  font-size: 56px;
+  font-weight: 900;
+  height: 96px;
+  justify-items: center;
+  line-height: 1;
+  place-items: center;
+  width: 96px;
+}
+
+.auth-hero__content--x {
+  margin-top: auto;
+  max-width: 540px;
+}
+
+.auth-hero__title--x {
+  font-size: 52px;
+  font-weight: 900;
+  line-height: 1.08;
+  margin-bottom: 20px;
+}
+
+.auth-hero__body--x {
+  color: #e7e9ea;
+  font-size: 18px;
+  line-height: 1.7;
+  max-width: 400px;
+}
+
+.auth-x-stat-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 36px;
+}
+
+.auth-x-stat {
+  border: 1px solid #536471;
+  border-radius: 999px;
+  color: #e7e9ea;
+  font-size: 13px;
+  font-weight: 800;
+  padding: 8px 14px;
+}
+
+.auth-form--x {
+  background: #ffffff;
+  color: #0f1419;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: clamp(40px, 6vw, 88px);
+}
+
+.auth-form--x > .MuiStack-root {
+  margin: 0 auto;
+  max-width: 400px;
+  width: 100%;
+}
+
+.auth-x-form-title {
+  color: #0f1419;
+  font-weight: 900;
+}
+
+.auth-form__subtitle--x {
+  color: #536471;
+  font-weight: 600;
+}
+
+.auth-x-input .MuiOutlinedInput-root {
+  border-radius: 8px;
+}
+
+.auth-submit--x {
+  background: #0f1419;
+  border-radius: 999px;
+  box-shadow: none;
+  color: #ffffff;
+  font-weight: 900;
+  min-height: 48px;
+  text-transform: none;
+}
+
+.auth-submit--x:hover {
+  background: #272c30;
+  box-shadow: none;
+}
+
+.auth-divider--x {
+  border-color: #eff3f4;
+}
+
+.auth-x-join-title {
+  color: #0f1419;
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.auth-join-button--x {
+  border-color: #cfd9de;
+  border-radius: 999px;
+  color: #0f1419;
+  font-weight: 900;
+  min-height: 46px;
+  text-transform: none;
+}
+
+.auth-join-button--x:hover {
+  background: #f7f9f9;
+  border-color: #cfd9de;
+}
+
+.auth-x-policy {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+@media (max-width: 860px) {
+  .auth-card--x {
+    grid-template-columns: 1fr;
+    min-height: 100vh;
+  }
+
+  .auth-hero--x {
+    border-right: 0;
+    min-height: 42vh;
+    padding: 32px 24px;
+  }
+
+  .auth-x-logo {
+    font-size: 36px;
+    height: 68px;
+    width: 68px;
+  }
+
+  .auth-hero__title--x {
+    font-size: 36px;
+  }
+
+  .auth-form--x {
+    min-height: 58vh;
+    padding: 32px 24px;
+  }
+}
+
+.auth-google-button {
+  min-height: 44px;
+  width: 100%;
+}
+
+.auth-google-button > div {
+  margin: 0 auto;
+}
+.auth-verify-card {
+  align-self: center;
+  border: 0;
+  box-shadow: none;
+  margin: auto;
+  max-width: 520px;
+}
+
+.auth-verify-icon {
+  align-items: center;
+  background: #e7f5ef;
+  border-radius: 999px;
+  color: #1f6f5b;
+  display: grid;
+  height: 72px;
+  justify-items: center;
+  place-items: center;
+  width: 72px;
+}
+
+.auth-verify-description {
+  line-height: 1.7;
+}
+.auth-card--join {
+  grid-template-columns: minmax(0, 1fr) minmax(520px, 0.95fr);
+}
+
+.auth-hero--join {
+  min-height: 100vh;
+}
+
+.auth-form--join {
+  overflow-y: auto;
+  padding: clamp(28px, 4vw, 56px);
+}
+
+.auth-form--join > .MuiStack-root {
+  max-width: 520px;
+}
+
+.auth-email-group--join {
+  gap: 10px;
+}
+
+.auth-email-row--compact {
+  align-items: flex-start;
+  gap: 0;
+  grid-template-columns: minmax(0, 1fr) 38px minmax(170px, 0.85fr);
+}
+
+.auth-email-row--compact .MuiOutlinedInput-root {
+  border-radius: 8px;
+}
+
+.auth-email-row--compact .auth-email-id .MuiOutlinedInput-root {
+  border-bottom-right-radius: 0;
+  border-top-right-radius: 0;
+}
+
+.auth-email-row--compact .auth-email-domain .MuiOutlinedInput-root {
+  border-bottom-left-radius: 0;
+  border-top-left-radius: 0;
+}
+
+.auth-email-at--compact {
+  align-items: center;
+  align-self: flex-start;
+  background: #f7f9f9;
+  border-bottom: 1px solid #cfd9de;
+  border-top: 1px solid #cfd9de;
+  color: #536471;
+  display: flex;
+  font-size: 18px;
+  font-weight: 900;
+  height: 56px;
+  justify-content: center;
+  line-height: 1;
+  margin-top: 0;
+}
+
+.auth-agree--join {
+  align-items: flex-start;
+  color: #536471;
+  margin-left: -10px;
+}
+
+.auth-agree--join .MuiFormControlLabel-label {
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.auth-form--join .password-strength {
+  margin-bottom: 2px;
+  margin-top: -4px;
+}
+
+@media (max-width: 920px) {
+  .auth-card--join {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-hero--join {
+    min-height: 36vh;
+  }
+
+  .auth-form--join {
+    min-height: 64vh;
+  }
+}
+
+@media (max-width: 560px) {
+  .auth-email-row--compact {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .auth-email-at--compact {
+    background: transparent;
+    border: 0;
+    height: auto;
+    justify-content: flex-start;
+    padding-left: 2px;
+  }
+
+  .auth-email-row--compact .auth-email-id .MuiOutlinedInput-root,
+  .auth-email-row--compact .auth-email-domain .MuiOutlinedInput-root {
+    border-radius: 8px;
+  }
+}
