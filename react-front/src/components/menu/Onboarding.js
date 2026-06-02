@@ -81,7 +81,7 @@ function Onboarding() {
 
         updateAuthUser(nextUser);
         setUser(nextUser);
-        navigate('/main', { replace: true });
+        navigate('/home', { replace: true });
       })
       .catch((err) => {
         setError(err.message || copy.failed);

@@ -12,6 +12,7 @@ import Follow from './components/menu/Follow';
 import Chat from './components/menu/Chat';
 import Bookmark from './components/menu/Bookmark';
 import Profile from './components/menu/Profile';
+import PostDetail from './components/menu/PostDetail';
 import Onboarding from './components/menu/Onboarding';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import './css/layout.css';
@@ -26,17 +27,20 @@ function App() {
           <Route path="/join" element={<Join />} />
           <Route path="/verify-email" element={<EmailVerify />} />
           <Route element={<ProtectedRoute />}>
-            <Route path="/main" element={<Main />}>
-              <Route index element={<Home />} />
-              <Route path="onboarding" element={<Onboarding />} />
-              <Route path="explore" element={<Explore />} />
-              <Route path="alerts" element={<Alerts />} />
-              <Route path="follow" element={<Follow />} />
-              <Route path="chat" element={<Chat />} />
-              <Route path="bookmark" element={<Bookmark />} />
-              <Route path="profile" element={<Profile />} />
+            <Route element={<Main />}>
+              <Route path="/home" element={<Home />} />
+              <Route path="/onboarding" element={<Onboarding />} />
+              <Route path="/explore" element={<Explore />} />
+              <Route path="/alerts" element={<Alerts />} />
+              <Route path="/follow" element={<Follow />} />
+              <Route path="/chat" element={<Chat />} />
+              <Route path="/bookmark" element={<Bookmark />} />
+              <Route path="/:username/status/:postId" element={<PostDetail />} />
+              <Route path="/:username" element={<Profile />} />
             </Route>
           </Route>
+          <Route path="/main" element={<Navigate to="/home" replace />} />
+          <Route path="/main/*" element={<Navigate to="/home" replace />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Box>

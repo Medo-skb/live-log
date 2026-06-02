@@ -40,6 +40,7 @@ export async function apiRequest(endpoint, options = {}) {
   const { method = 'GET', body, query, token, auth = false, headers = {} } = options;
   const upperMethod = method.toUpperCase();
   const hasBody = body !== undefined && !['GET', 'HEAD'].includes(upperMethod);
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
   const accessToken = token || (auth ? getAccessToken() : '');
 
   if (auth && isAccessTokenExpired(accessToken)) {
@@ -50,11 +51,11 @@ export async function apiRequest(endpoint, options = {}) {
   const response = await fetch(buildUrl(endpoint, query), {
     method: upperMethod,
     headers: {
-      ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
+      ...(hasBody && !isFormData ? { 'Content-Type': 'application/json' } : {}),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...headers,
     },
-    ...(hasBody ? { body: JSON.stringify(body) } : {}),
+    ...(hasBody ? { body: isFormData ? body : JSON.stringify(body) } : {}),
   });
 
   const data = await parseResponse(response);

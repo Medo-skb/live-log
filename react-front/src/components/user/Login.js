@@ -95,14 +95,13 @@ function Login() {
 
     saveAuthSession({ token: data.token, user: data.user });
     localStorage.removeItem('pendingEmail');
-    navigate(hasSelectedCategories(data.user) ? '/main' : '/main/onboarding');
+    navigate(hasSelectedCategories(data.user) ? '/home' : '/onboarding');
   }, [navigate]);
 
   const handleGoogleCredential = useCallback((response) => {
     if (!response?.credential) {
       const message = copy.googleFailed;
       setGoogleError(message);
-      alert(message);
       return;
     }
 
@@ -116,7 +115,6 @@ function Login() {
       .catch((err) => {
         const message = err.message || copy.googleFailed;
         setGoogleError(message);
-        alert(message);
       })
       .finally(() => {
         setLoading(false);
@@ -179,7 +177,6 @@ function Login() {
 
     if (validationMessage) {
       setError(validationMessage);
-      alert(validationMessage);
       return;
     }
 
@@ -198,7 +195,6 @@ function Login() {
       .catch((err) => {
         const message = err.message || copy.failed;
         setError(message);
-        alert(message);
       })
       .finally(() => {
         setLoading(false);

@@ -15,6 +15,8 @@ import AddRoundedIcon from '@mui/icons-material/AddRounded';
 import BookmarkBorderRoundedIcon from '@mui/icons-material/BookmarkBorderRounded';
 import ChatBubbleOutlineRoundedIcon from '@mui/icons-material/ChatBubbleOutlineRounded';
 import HomeRoundedIcon from '@mui/icons-material/HomeRounded';
+import DarkModeRoundedIcon from '@mui/icons-material/DarkModeRounded';
+import LightModeRoundedIcon from '@mui/icons-material/LightModeRounded';
 import LogoutRoundedIcon from '@mui/icons-material/LogoutRounded';
 import MoreHorizRoundedIcon from '@mui/icons-material/MoreHorizRounded';
 import NotificationsNoneRoundedIcon from '@mui/icons-material/NotificationsNoneRounded';
@@ -23,7 +25,10 @@ import PersonRoundedIcon from '@mui/icons-material/PersonRounded';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
 import WhatshotRoundedIcon from '@mui/icons-material/WhatshotRounded';
+import PostComposerDialog from './post/PostComposerDialog';
 import '../css/main.css';
+
+const THEME_MODE_KEY = 'liveLogThemeMode';
 
 const copy = {
   home: "홈",
@@ -35,6 +40,8 @@ const copy = {
   profile: "프로필",
   post: "게시하기",
   settings: "설정",
+  darkMode: "다크모드",
+  lightMode: "라이트모드",
   accountLogout: "계정에서 로그아웃",
   searchPlaceholder: "작품, 태그, 사용자를 검색",
   trendKeywords: "트렌드 키워드",
@@ -46,13 +53,13 @@ const copy = {
 };
 
 const navItems = [
-  { label: copy.home, path: '/main', icon: <HomeRoundedIcon /> },
-  { label: copy.explore, path: '/main/explore', icon: <SearchRoundedIcon /> },
-  { label: copy.alerts, path: '/main/alerts', icon: <NotificationsNoneRoundedIcon />, badge: 2 },
-  { label: copy.follow, path: '/main/follow', icon: <PersonAddAltRoundedIcon /> },
-  { label: copy.chat, path: '/main/chat', icon: <ChatBubbleOutlineRoundedIcon /> },
-  { label: copy.bookmark, path: '/main/bookmark', icon: <BookmarkBorderRoundedIcon /> },
-  { label: copy.profile, path: '/main/profile', icon: <PersonRoundedIcon /> },
+  { label: copy.home, path: '/home', icon: <HomeRoundedIcon /> },
+  { label: copy.explore, path: '/explore', icon: <SearchRoundedIcon /> },
+  { label: copy.alerts, path: '/alerts', icon: <NotificationsNoneRoundedIcon />, badge: 2 },
+  { label: copy.follow, path: '/follow', icon: <PersonAddAltRoundedIcon /> },
+  { label: copy.chat, path: '/chat', icon: <ChatBubbleOutlineRoundedIcon /> },
+  { label: copy.bookmark, path: '/bookmark', icon: <BookmarkBorderRoundedIcon /> },
+  { label: copy.profile, path: '__PROFILE_PATH__', icon: <PersonRoundedIcon /> },
 ];
 
 const trendItems = [
@@ -61,6 +68,10 @@ const trendItems = [
   { keyword: "주술회전", count: '781' },
   { keyword: "새벽감상", count: '420' },
 ];
+
+function getStoredThemeMode() {
+  return localStorage.getItem(THEME_MODE_KEY) === 'dark' ? 'dark' : 'light';
+}
 
 function getStoredUser() {
   try {
@@ -75,8 +86,8 @@ function hasSelectedCategories(user) {
 }
 
 function isActivePath(currentPath, itemPath) {
-  if (itemPath === '/main') {
-    return currentPath === '/main';
+  if (itemPath === '/home') {
+    return currentPath === '/home';
   }
 
   return currentPath === itemPath || currentPath.startsWith(itemPath + '/');
@@ -87,16 +98,34 @@ function Main() {
   const location = useLocation();
   const [user, setUser] = useState(() => getStoredUser());
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState(() => getStoredThemeMode());
+  const [postDialogOpen, setPostDialogOpen] = useState(false);
 
   const displayName = user?.nickname || user?.username || "게스트";
   const accountId = user?.username || 'guest';
   const avatarSrc = user?.profileImage || user?.picture || '';
+  const isDarkMode = themeMode === 'dark';
+  const profilePath = '/' + accountId;
+  const resolvedNavItems = navItems.map((item) => (item.path === '__PROFILE_PATH__' ? { ...item, path: profilePath } : item));
 
   useEffect(() => {
-    if (!hasSelectedCategories(user) && location.pathname !== '/main/onboarding') {
-      navigate('/main/onboarding', { replace: true });
+    if (!hasSelectedCategories(user) && location.pathname !== '/onboarding') {
+      navigate('/onboarding', { replace: true });
     }
   }, [location.pathname, navigate, user]);
+
+  const handleThemeToggle = () => {
+    setThemeMode((prev) => {
+      const nextMode = prev === 'dark' ? 'light' : 'dark';
+      localStorage.setItem(THEME_MODE_KEY, nextMode);
+
+      return nextMode;
+    });
+  };
+
+  const handlePostCreated = (post) => {
+    window.dispatchEvent(new CustomEvent('liveLogPostCreated', { detail: post }));
+  };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -105,7 +134,7 @@ function Main() {
   };
 
   return (
-    <Box className="main-shell">
+    <Box className={isDarkMode ? 'main-shell main-shell--dark' : 'main-shell'}>
       <Box component="aside" className="main-sidebar">
         <Box className="main-brand">
           <Box className="main-brand__mark">L</Box>
@@ -113,7 +142,7 @@ function Main() {
         </Box>
 
         <Stack component="nav" className="main-nav" spacing={0.25}>
-          {navItems.map((item) => {
+          {resolvedNavItems.map((item) => {
             const active = isActivePath(location.pathname, item.path);
 
             return (
@@ -135,7 +164,7 @@ function Main() {
           })}
         </Stack>
 
-        <Button className="main-write-button" fullWidth onClick={() => navigate('/main')} startIcon={<AddRoundedIcon />} variant="contained">
+        <Button className="main-write-button" fullWidth onClick={() => setPostDialogOpen(true)} startIcon={<AddRoundedIcon />} variant="contained">
           {copy.post}
         </Button>
 
@@ -144,6 +173,14 @@ function Main() {
             <Box className="main-account-menu">
               <Button className="main-account-menu__item" fullWidth startIcon={<SettingsRoundedIcon />}>
                 {copy.settings}
+              </Button>
+              <Button
+                className="main-account-menu__item"
+                fullWidth
+                onClick={handleThemeToggle}
+                startIcon={isDarkMode ? <LightModeRoundedIcon /> : <DarkModeRoundedIcon />}
+              >
+                {isDarkMode ? copy.lightMode : copy.darkMode}
               </Button>
               <Button className="main-account-menu__item" fullWidth onClick={handleLogout} startIcon={<LogoutRoundedIcon />}>
                 @{accountId} {copy.accountLogout}
@@ -163,7 +200,17 @@ function Main() {
         </Box>
       </Box>
 
-      <Outlet context={{ accountId, avatarSrc, displayName, setUser, user }} />
+      <Outlet context={{ accountId, avatarSrc, displayName, isDarkMode, setUser, user }} />
+
+      <PostComposerDialog
+        avatarSrc={avatarSrc}
+        displayName={displayName}
+        isDarkMode={isDarkMode}
+        onClose={() => setPostDialogOpen(false)}
+        onPostCreated={handlePostCreated}
+        open={postDialogOpen}
+        user={user}
+      />
 
       <Box component="aside" className="main-aside">
         <TextField
@@ -204,3 +251,4 @@ function Main() {
 }
 
 export default Main;
+

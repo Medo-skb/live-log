@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const oracledb = require('oracledb');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -119,13 +119,13 @@ async function findUserByEmail(connection, email) {
   return result.rows[0];
 }
 
-async function createGoogleUsername(connection, email, googleSub) {
+async function createGoogleUsername(connection, email) {
   const emailName = email.split('@')[0].replace(/[^A-Za-z0-9_]/g, '_');
-  const suffix = String(googleSub).slice(-6);
-  const base = (emailName || 'google_user').slice(0, 13);
+  const base = (emailName || 'google_user').slice(0, 20);
 
   for (let i = 0; i < 20; i += 1) {
-    const username = i === 0 ? `${base}_${suffix}`.slice(0, 20) : `${base}_${suffix}_${i}`.slice(0, 20);
+    const suffix = i === 0 ? '' : String(i + 1);
+    const username = i === 0 ? base : `${base.slice(0, 20 - suffix.length)}${suffix}`;
     const result = await connection.execute(
       `
         SELECT USERNAME
@@ -139,7 +139,7 @@ async function createGoogleUsername(connection, email, googleSub) {
     if (result.rows.length === 0) return username;
   }
 
-  return `google_${Date.now()}`.slice(0, 20);
+  return ('google' + Date.now()).slice(0, 20);
 }
 
 router.post('/register', async (req, res) => {
@@ -467,7 +467,7 @@ router.post('/google', async (req, res) => {
     let user = await findUserByEmail(connection, email);
 
     if (!user) {
-      const username = await createGoogleUsername(connection, email, payload.sub);
+      const username = await createGoogleUsername(connection, email);
       const nickname = payload.name || 'Google User'; // 구글 프로필 이름을 닉네임으로 사용
       const hashPassword = await bcrypt.hash(`GOOGLE_LOGIN_${payload.sub}`, SALT_ROUNDS);
 

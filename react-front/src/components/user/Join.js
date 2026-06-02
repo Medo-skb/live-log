@@ -172,7 +172,6 @@ function Join() {
 
     if (validationMessage) {
       setError(validationMessage);
-      alert(validationMessage);
       return;
     }
 
@@ -189,13 +188,11 @@ function Join() {
 
     registerUser(info)
       .then((data) => {
-        alert(data.message || '회원가입이 완료되었습니다.');
         navigate('/');
       })
       .catch((err) => {
         const message = err.message || copy.failed;
         setError(message);
-        alert(message);
       })
       .finally(() => {
         setLoading(false);
