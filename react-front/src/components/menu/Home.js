@@ -43,6 +43,7 @@ import {
 import { MEDIA_ACCEPT, validateMediaFiles } from '../../utils/mediaValidation';
 import MediaPreviewList from '../post/MediaPreviewList';
 import PostComposerDialog from '../post/PostComposerDialog';
+import { useAppModal } from '../common/ModalProvider';
 import { CATEGORY_ALL, CATEGORY_ALL_ID, DEFAULT_CATEGORIES } from '../../constants/categories';
 
 const PAGE_SIZE = 20;
@@ -55,46 +56,52 @@ const SPOILER_STATUS = {
 };
 
 const copy = {
-  category: '\uce74\ud14c\uace0\ub9ac',
-  spoiler: '\uc2a4\ud3ec\uc77c\ub7ec',
-  workName: '\uc791\ud488\uba85',
-  progress: '\uc9c4\ub3c4',
-  placeholder: '\uc9c0\uae08 \ubcf4\ub294 \uc791\ud488\uc758 \uc21c\uac04\uc744 \ub0a8\uaca8\ubcf4\uc138\uc694.',
-  submit: '\uac8c\uc2dc\ud558\uae30',
-  submitting: '\uac8c\uc2dc \uc911',
-  fileAttach: '\ud30c\uc77c \ucca8\ubd80',
-  tagButton: '\ud0dc\uadf8',
-  save: '\uc800\uc7a5',
+  category: '카테고리',
+  spoiler: '스포일러',
+  workName: '작품명',
+  progress: '진도',
+  placeholder: '지금 보는 작품의 순간을 남겨보세요.',
+  submit: '게시하기',
+  submitting: '게시 중',
+  fileAttach: '파일 첨부',
+  tagButton: '태그',
+  save: '저장',
   saved: '저장됨',
   commentPlaceholder: '댓글을 입력해주세요.',
   commentSubmit: '댓글',
   commentSubmitting: '등록 중',
   commentEmpty: '아직 댓글이 없습니다.',
-  aiIdle: 'AI \ubd84\uc11d',
-  aiAnalyzing: '\ubd84\uc11d \uc911',
-  aiSafe: '\uc548\uc804',
-  aiSpoiler: '\uc2a4\ud3ec\uc77c\ub7ec \uac10\uc9c0',
-  empty: '\uc544\uc9c1 \ub4f1\ub85d\ub41c \ub85c\uadf8\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.',
-  loadError: '\uac8c\uc2dc\uae00\uc744 \ubd88\ub7ec\uc624\uc9c0 \ubabb\ud588\uc2b5\ub2c8\ub2e4.',
-  loadingMore: '\uc774\uc804 \ub85c\uadf8\ub97c \ubd88\ub7ec\uc624\ub294 \uc911...',
-  endOfFeed: '\ub354 \uc774\uc0c1 \ubd88\ub7ec\uc62c \ub85c\uadf8\uac00 \uc5c6\uc2b5\ub2c8\ub2e4.',
-  newPosts: (count) => `${count}\uac1c\uc758 \uc0c8\ub85c\uc6b4 \ud3ec\uc2a4\ud2b8 \ubcf4\uae30`,
-  editMode: '\uc218\uc815 \uc911\uc778 \uac8c\uc2dc\uae00\uc785\ub2c8\ub2e4.',
-  updateSubmit: '\uc218\uc815 \uc644\ub8cc',
-  cancelEdit: '\uc218\uc815 \ucde8\uc18c',
-  editPost: '\uc218\uc815\ud558\uae30',
-  deletePost: '\uc0ad\uc81c\ud558\uae30',
-  followUser: '\ud314\ub85c\uc6b0\ud558\uae30',
-  blockUser: '\ucc28\ub2e8\ud558\uae30',
-  copyUrl: 'URL \ubcf5\uc0ac',
-  reportPost: '\uac8c\uc2dc\ubb3c \uc2e0\uace0\ud558\uae30',
+  aiIdle: 'AI 분석',
+  aiAnalyzing: '분석 중',
+  aiSafe: '안전',
+  aiSpoiler: '스포일러 감지',
+  empty: '아직 등록된 로그가 없습니다.',
+  loadError: '게시글을 불러오지 못했습니다.',
+  loadingMore: '이전 로그를 불러오는 중...',
+  endOfFeed: '더 이상 불러올 로그가 없습니다.',
+  newPosts: (count) => `${count}개의 새로운 포스트 보기`,
+  editMode: '수정 중인 게시글입니다.',
+  updateSubmit: '수정 완료',
+  cancelEdit: '수정 취소',
+  editPost: '수정하기',
+  deletePost: '삭제하기',
+  followUser: '팔로우하기',
+  blockUser: '차단하기',
+  copyUrl: 'URL 복사',
+  reportPost: '게시물 신고하기',
   repostAction: '재게시',
   quoteAction: '인용하세요',
-  deleteConfirm: '\uc774 \uac8c\uc2dc\uae00\uc744 \uc0ad\uc81c\ud560\uae4c\uc694?',
-  copiedUrl: 'URL\uc774 \ubcf5\uc0ac\ub418\uc5c8\uc2b5\ub2c8\ub2e4.',
-  nextFeature: '\uc774 \uae30\ub2a5\uc740 \ub2e4\uc74c \ub2e8\uacc4\uc5d0\uc11c API\ub97c \uc5f0\uacb0\ud558\uaca0\uc2b5\ub2c8\ub2e4.',
+  deleteConfirmTitle: '게시물을 삭제할까요?',
+  deleteConfirmBody: '이 동작은 취소할 수 없으며 내 프로필, 나를 팔로우하는 계정의 타임라인, 그리고 검색 결과에서 삭제됩니다.',
+  deleteConfirmButton: '삭제하기',
+  cancel: '취소',
+  copiedUrlTitle: 'URL이 복사되었습니다.',
+  copiedUrlBody: '게시물 링크를 클립보드에 저장했습니다.',
+  copyFailedTitle: 'URL을 복사하지 못했습니다.',
+  copyFailedBody: '아래 링크를 직접 복사해주세요.',
+  nextFeatureTitle: '준비 중인 기능입니다.',
+  nextFeature: '이 기능은 다음 단계에서 API를 연결하겠습니다.',
 };
-
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
 
 function resolveMediaUrl(fileUrl) {
@@ -165,6 +172,10 @@ function getPostDetailPath(post) {
   return '/' + encodeURIComponent(formatPostUsername(post?.user?.username)) + '/status/' + post?.postId;
 }
 
+function getPostPhotoPath(post, photoIndex) {
+  return getPostDetailPath(post) + '/photo/' + photoIndex;
+}
+
 function QuotePostCard({ post }) {
   if (!post) return null;
 
@@ -190,6 +201,7 @@ function QuotePostCard({ post }) {
 
 function Home() {
   const navigate = useNavigate();
+  const appModal = useAppModal();
   const { avatarSrc, displayName, isDarkMode, user } = useOutletContext();
   const [activeCategoryId, setActiveCategoryId] = useState(CATEGORY_ALL_ID);
   const [content, setContent] = useState('');
@@ -370,6 +382,11 @@ function Home() {
     navigate(getPostDetailPath(post));
   };
 
+  const handleOpenPostPhoto = (event, post, photoIndex) => {
+    event.stopPropagation();
+    navigate(getPostPhotoPath(post, photoIndex));
+  };
+
   const handleAnalyzeSpoiler = () => {
     if (!content.trim()) return;
 
@@ -411,7 +428,17 @@ function Home() {
   };
 
   const handleDeletePost = async () => {
-    if (!postMenuPost || !window.confirm(copy.deleteConfirm)) return;
+    if (!postMenuPost) return;
+
+    const confirmed = await appModal.showConfirm({
+      title: copy.deleteConfirmTitle,
+      message: copy.deleteConfirmBody,
+      confirmText: copy.deleteConfirmButton,
+      cancelText: copy.cancel,
+      variant: 'danger',
+    });
+
+    if (!confirmed) return;
 
     const targetPostId = postMenuPost.postId;
     handlePostMenuClose();
@@ -434,15 +461,24 @@ function Home() {
 
     try {
       await navigator.clipboard.writeText(url);
-      setError(copy.copiedUrl);
+      await appModal.showAlert({
+        title: copy.copiedUrlTitle,
+        message: copy.copiedUrlBody,
+      });
     } catch (copyError) {
-      setError(url);
+      await appModal.showAlert({
+        title: copy.copyFailedTitle,
+        message: copy.copyFailedBody + '\n' + url,
+      });
     }
   };
 
   const handlePreparedMenuAction = () => {
     handlePostMenuClose();
-    setError(copy.nextFeature);
+    appModal.showAlert({
+      title: copy.nextFeatureTitle,
+      message: copy.nextFeature,
+    });
   };
 
   const handleRepostMenuOpen = (event, post) => {
@@ -476,6 +512,16 @@ function Home() {
   };
 
   const handleQuotePostCreated = (post) => {
+    if (post?.quotePostId) {
+      updatePostById(post.quotePostId, (currentPost) => ({
+        ...currentPost,
+        counts: {
+          ...currentPost.counts,
+          reposts: Number(currentPost.counts?.reposts || 0) + 1,
+        },
+      }));
+    }
+
     if (post && isPostVisibleByCategory(post, activeCategoryId)) {
       setPosts((prevPosts) => mergeUniquePosts(prevPosts, [post]));
     }
@@ -809,12 +855,16 @@ function Home() {
 
                   {post.media?.length > 0 && (
                     <Box className="main-media-list" onClick={(event) => event.stopPropagation()}>
-                      {post.media.map((media) => (
-                        <Box className="main-media-item" key={media.mediaId}>
-                          {media.mediaType === 'IMAGE' && <img alt="post media" src={resolveMediaUrl(media.fileUrl)} />}
-                          {media.mediaType === 'VIDEO' && <video controls src={resolveMediaUrl(media.fileUrl)} />}
-                        </Box>
-                      ))}
+                      {post.media.map((media) => {
+                        const photoIndex = post.media.filter((item) => item.mediaType === 'IMAGE').findIndex((item) => item.mediaId === media.mediaId) + 1;
+
+                        return (
+                          <Box className="main-media-item" key={media.mediaId}>
+                            {media.mediaType === 'IMAGE' && <img alt="post media" className="main-media-clickable" onClick={(event) => handleOpenPostPhoto(event, post, photoIndex)} src={resolveMediaUrl(media.fileUrl)} />}
+                            {media.mediaType === 'VIDEO' && <video controls src={resolveMediaUrl(media.fileUrl)} />}
+                          </Box>
+                        );
+                      })}
                     </Box>
                   )}
 
@@ -917,15 +967,16 @@ function Home() {
               {isPostMenuMine ? (
                 <>
                   <Button className="main-post-menu__item" fullWidth onClick={handleStartEdit}>{copy.editPost}</Button>
+                  <Button className="main-post-menu__item" fullWidth onClick={handleCopyPostUrl}>{copy.copyUrl}</Button>
                   <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handleDeletePost}>{copy.deletePost}</Button>
                 </>
               ) : (
                 <>
                   <Button className="main-post-menu__item" fullWidth onClick={handlePreparedMenuAction}>{copy.followUser}</Button>
+                  <Button className="main-post-menu__item" fullWidth onClick={handleCopyPostUrl}>{copy.copyUrl}</Button>
                   <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handlePreparedMenuAction}>{copy.blockUser}</Button>
                 </>
               )}
-              <Button className="main-post-menu__item" fullWidth onClick={handleCopyPostUrl}>{copy.copyUrl}</Button>
               <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handlePreparedMenuAction}>{copy.reportPost}</Button>
             </Box>
           </Popover>

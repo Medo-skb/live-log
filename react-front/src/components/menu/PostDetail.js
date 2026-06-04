@@ -20,6 +20,7 @@ import BookmarkRoundedIcon from '@mui/icons-material/BookmarkRounded';
 import ChatBubbleOutlineRoundedIcon from '@mui/icons-material/ChatBubbleOutlineRounded';
 import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded';
 import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded';
+import MoreHorizRoundedIcon from '@mui/icons-material/MoreHorizRounded';
 import RepeatRoundedIcon from '@mui/icons-material/RepeatRounded';
 import VisibilityOffRoundedIcon from '@mui/icons-material/VisibilityOffRounded';
 import {
@@ -29,11 +30,28 @@ import {
   togglePostLike,
   togglePostRepost,
   togglePostBookmark,
+  deletePost,
 } from '../../api/postApi';
 import PostComposerDialog from '../post/PostComposerDialog';
+import { useAppModal } from '../common/ModalProvider';
 
 const COMMENT_LIMIT = 20;
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
+
+const copy = {
+  editPost: '수정하기',
+  deletePost: '삭제하기',
+  followUser: '팔로우하기',
+  blockUser: '차단하기',
+  copyUrl: 'URL 복사',
+  reportPost: '게시물 신고하기',
+  copiedUrlTitle: 'URL이 복사되었습니다.',
+  copiedUrlBody: '게시물 링크를 클립보드에 저장했습니다.',
+  copyFailedTitle: 'URL을 복사하지 못했습니다.',
+  copyFailedBody: '아래 링크를 직접 복사해주세요.',
+  nextFeatureTitle: '준비 중인 기능입니다.',
+  nextFeature: 'DB 정책과 API를 정리한 뒤 연결하겠습니다.',
+};
 
 function resolveMediaUrl(fileUrl) {
   if (!fileUrl) return '';
@@ -78,6 +96,19 @@ function formatUsername(username) {
   return String(username || 'user');
 }
 
+function getPostDetailPath(post) {
+  return '/' + encodeURIComponent(String(post?.user?.username || 'user')) + '/status/' + post?.postId;
+}
+
+function getPostPhotoPath(post, photoIndex) {
+  return getPostDetailPath(post) + '/photo/' + photoIndex;
+}
+
+function isMyPost(post, viewer) {
+  if (!post || !viewer) return false;
+  return String(post.user?.username || '') === String(viewer.username || '') || String(post.user?.userId || '') === String(viewer.userId || '');
+}
+
 function QuotePostCard({ post }) {
   if (!post) return null;
 
@@ -104,6 +135,7 @@ function QuotePostCard({ post }) {
 function PostDetail() {
   const { postId } = useParams();
   const navigate = useNavigate();
+  const appModal = useAppModal();
   const { avatarSrc, displayName, isDarkMode, user } = useOutletContext();
   const [post, setPost] = useState(null);
   const [comments, setComments] = useState([]);
@@ -114,10 +146,13 @@ function PostDetail() {
   const [commentLoading, setCommentLoading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [reactionLoadingKey, setReactionLoadingKey] = useState('');
+  const [postMenuAnchorEl, setPostMenuAnchorEl] = useState(null);
   const [repostMenuAnchorEl, setRepostMenuAnchorEl] = useState(null);
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
   const [error, setError] = useState('');
 
+  const isPostMenuOpen = Boolean(postMenuAnchorEl);
+  const isPostMenuMine = isMyPost(post, user);
   const isRepostMenuOpen = Boolean(repostMenuAnchorEl);
 
   useEffect(() => {
@@ -149,6 +184,74 @@ function PostDetail() {
     };
   }, [postId]);
 
+  const handlePostMenuOpen = (event) => {
+    setPostMenuAnchorEl(event.currentTarget);
+  };
+
+  const handlePostMenuClose = () => {
+    setPostMenuAnchorEl(null);
+  };
+
+  const handlePreparedMenuAction = () => {
+    handlePostMenuClose();
+    appModal.showAlert({
+      title: copy.nextFeatureTitle,
+      message: copy.nextFeature,
+    });
+  };
+
+  const handleCopyPostUrl = async () => {
+    if (!post) return;
+
+    const url = window.location.origin + getPostDetailPath(post);
+    handlePostMenuClose();
+
+    try {
+      await navigator.clipboard.writeText(url);
+      await appModal.showAlert({
+        title: copy.copiedUrlTitle,
+        message: copy.copiedUrlBody,
+      });
+    } catch (copyError) {
+      await appModal.showAlert({
+        title: copy.copyFailedTitle,
+        message: copy.copyFailedBody + '\n' + url,
+      });
+    }
+  };
+
+  const handleDeletePost = async () => {
+    if (!post) return;
+
+    const confirmed = await appModal.showConfirm({
+      title: copy.deleteConfirmTitle,
+      message: copy.deleteConfirmBody,
+      confirmText: copy.deletePost,
+      cancelText: copy.cancel,
+      variant: 'danger',
+    });
+
+    if (!confirmed) return;
+
+    handlePostMenuClose();
+    setError('');
+
+    try {
+      await deletePost({ postId: post.postId });
+      navigate('/home', { replace: true });
+    } catch (requestError) {
+      await appModal.showAlert({
+        title: copy.nextFeatureTitle,
+        message: requestError.message || copy.deleteError,
+      });
+    }
+  };
+
+  const handleOpenPostPhoto = (photoIndex) => {
+    if (!post) return;
+    navigate(getPostPhotoPath(post, photoIndex));
+  };
+
   const handleRepostMenuOpen = (event) => {
     setRepostMenuAnchorEl(event.currentTarget);
   };
@@ -172,6 +275,16 @@ function PostDetail() {
   };
 
   const handleQuotePostCreated = (createdPost) => {
+    if (createdPost?.quotePostId === post?.postId) {
+      setPost((prevPost) => ({
+        ...prevPost,
+        counts: {
+          ...prevPost.counts,
+          reposts: Number(prevPost.counts?.reposts || 0) + 1,
+        },
+      }));
+    }
+
     if (createdPost) {
       window.dispatchEvent(new CustomEvent('liveLogPostCreated', { detail: createdPost }));
     }
@@ -281,10 +394,13 @@ function PostDetail() {
           <Box className="post-detail-card">
             <Box className="post-detail-author-row">
               <Avatar className="main-avatar">{post.user.nickname.charAt(0)}</Avatar>
-              <Box>
+              <Box className="post-detail-author-row__text">
                 <Typography className="post-detail-author__name">{post.user.nickname}</Typography>
                 <Typography className="main-post__meta">@{formatUsername(post.user.username)}</Typography>
               </Box>
+              <IconButton aria-label="more" className="main-icon-button main-icon-button--small post-detail-more-button" onClick={handlePostMenuOpen}>
+                <MoreHorizRoundedIcon />
+              </IconButton>
             </Box>
 
             <Stack className="main-work-chip-row" direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
@@ -298,12 +414,16 @@ function PostDetail() {
 
             {post.media?.length > 0 && (
               <Box className="main-media-list">
-                {post.media.map((media) => (
-                  <Box className="main-media-item" key={media.mediaId}>
-                    {media.mediaType === 'IMAGE' && <img alt="post media" src={resolveMediaUrl(media.fileUrl)} />}
-                    {media.mediaType === 'VIDEO' && <video controls src={resolveMediaUrl(media.fileUrl)} />}
-                  </Box>
-                ))}
+                {post.media.map((media) => {
+                  const photoIndex = post.media.filter((item) => item.mediaType === 'IMAGE').findIndex((item) => item.mediaId === media.mediaId) + 1;
+
+                  return (
+                    <Box className="main-media-item" key={media.mediaId}>
+                      {media.mediaType === 'IMAGE' && <img alt="post media" className="main-media-clickable" onClick={() => handleOpenPostPhoto(photoIndex)} src={resolveMediaUrl(media.fileUrl)} />}
+                      {media.mediaType === 'VIDEO' && <video controls src={resolveMediaUrl(media.fileUrl)} />}
+                    </Box>
+                  );
+                })}
               </Box>
             )}
 
@@ -352,6 +472,33 @@ function PostDetail() {
               </Button>
             </Box>
           </Box>
+
+          <Popover
+            anchorEl={postMenuAnchorEl}
+            anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+            className={isDarkMode ? 'main-post-menu main-post-menu--dark' : 'main-post-menu'}
+            onClose={handlePostMenuClose}
+            open={isPostMenuOpen}
+            transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+            transitionDuration={0}
+          >
+            <Box className="main-post-menu__content" key={post?.postId + '-' + (isPostMenuMine ? 'mine' : 'other')}>
+              {isPostMenuMine ? (
+                <>
+                  <Button className="main-post-menu__item" fullWidth onClick={handlePreparedMenuAction}>{copy.editPost}</Button>
+                  <Button className="main-post-menu__item" fullWidth onClick={handleCopyPostUrl}>{copy.copyUrl}</Button>
+                  <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handleDeletePost}>{copy.deletePost}</Button>
+                </>
+              ) : (
+                <>
+                  <Button className="main-post-menu__item" fullWidth onClick={handlePreparedMenuAction}>{copy.followUser}</Button>
+                  <Button className="main-post-menu__item" fullWidth onClick={handleCopyPostUrl}>{copy.copyUrl}</Button>
+                  <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handlePreparedMenuAction}>{copy.blockUser}</Button>
+                </>
+              )}
+              <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handlePreparedMenuAction}>{copy.reportPost}</Button>
+            </Box>
+          </Popover>
 
           <Popover
             anchorEl={repostMenuAnchorEl}

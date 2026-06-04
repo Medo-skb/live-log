@@ -196,7 +196,7 @@ function mapPostRow(row) {
     liked: row.LIKED_BY_ME === 1,
     reposted: row.REPOSTED_BY_ME === 1,
     bookmarked: row.BOOKMARKED_BY_ME === 1,
-    quotePost: row.QUOTE_POST_ID ? {
+    quotePost: row.QUOTE_POST_ID && row.QUOTE_USER_ID ? {
       postId: row.QUOTE_POST_ID,
       categoryId: row.QUOTE_CATEGORY_ID,
       categoryName: row.QUOTE_CATEGORY_NAME,
@@ -239,20 +239,23 @@ function getPostSelectSql(whereClause) {
         qp.CONTENT AS QUOTE_CONTENT,
         TO_CHAR(qp.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS QUOTE_CREATED_AT,
         TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS CREATED_AT,
-        (SELECT COUNT(*) FROM POSTS child WHERE child.PARENT_POST_ID = p.POST_ID) AS COMMENT_COUNT,
-        (SELECT COUNT(*) FROM REPOST r WHERE r.POST_ID = p.POST_ID) AS REPOST_COUNT,
+        (SELECT COUNT(*) FROM POSTS child WHERE child.PARENT_POST_ID = p.POST_ID AND child.IS_DELETED = 0) AS COMMENT_COUNT,
+        (
+          (SELECT COUNT(*) FROM REPOST r WHERE r.POST_ID = p.POST_ID)
+          + (SELECT COUNT(*) FROM POSTS quote WHERE quote.QUOTE_POST_ID = p.POST_ID AND quote.IS_DELETED = 0)
+        ) AS REPOST_COUNT,
         (SELECT COUNT(*) FROM POST_LIKE pl WHERE pl.POST_ID = p.POST_ID) AS LIKE_COUNT,
         (SELECT COUNT(*) FROM POST_BOOKMARK pb WHERE pb.POST_ID = p.POST_ID) AS BOOKMARK_COUNT,
         CASE WHEN EXISTS (SELECT 1 FROM POST_LIKE pl WHERE pl.POST_ID = p.POST_ID AND pl.USER_ID = :viewerId) THEN 1 ELSE 0 END AS LIKED_BY_ME,
         CASE WHEN EXISTS (SELECT 1 FROM REPOST r WHERE r.POST_ID = p.POST_ID AND r.USER_ID = :viewerId) THEN 1 ELSE 0 END AS REPOSTED_BY_ME,
         CASE WHEN EXISTS (SELECT 1 FROM POST_BOOKMARK pb WHERE pb.POST_ID = p.POST_ID AND pb.USER_ID = :viewerId) THEN 1 ELSE 0 END AS BOOKMARKED_BY_ME,
         (SELECT LISTAGG(pt.TAG, ',') WITHIN GROUP (ORDER BY pt.TAG) FROM POST_TAG pt WHERE pt.POST_ID = p.POST_ID) AS TAGS,
-        (SELECT LISTAGG(pm.MEDIA_ID || ':' || pm.MEDIA_TYPE || ':' || pm.FILE_URL, '|') WITHIN GROUP (ORDER BY pm.ORDER_IDX) FROM POST_MEDIA pm WHERE pm.POST_ID = p.POST_ID) AS MEDIA_FILES
+        (SELECT LISTAGG(pm.MEDIA_ID || ':' || pm.MEDIA_TYPE || ':' || pm.FILE_PATH, '|') WITHIN GROUP (ORDER BY pm.ORDER_IDX) FROM POST_MEDIA pm WHERE pm.POST_ID = p.POST_ID) AS MEDIA_FILES
       FROM POSTS p
       JOIN USERS u ON u.USER_ID = p.USER_ID
       JOIN WORKS w ON w.WORK_ID = p.WORK_ID
       JOIN CATEGORY c ON c.CATEGORY_ID = w.CATEGORY_ID
-      LEFT JOIN POSTS qp ON qp.POST_ID = p.QUOTE_POST_ID
+      LEFT JOIN POSTS qp ON qp.POST_ID = p.QUOTE_POST_ID AND qp.IS_DELETED = 0
       LEFT JOIN USERS qu ON qu.USER_ID = qp.USER_ID
       LEFT JOIN WORKS qw ON qw.WORK_ID = qp.WORK_ID
       LEFT JOIN CATEGORY qc ON qc.CATEGORY_ID = qw.CATEGORY_ID
@@ -263,13 +266,33 @@ function getPostSelectSql(whereClause) {
   `;
 }
 
-function buildPostFilters({ categoryId, cursor, afterPostId }) {
-  const filters = ['p.PARENT_POST_ID IS NULL'];
+function buildPostFilters({ categoryId, cursor, afterPostId, username, search }) {
+  const filters = ['p.PARENT_POST_ID IS NULL', 'p.IS_DELETED = 0'];
   const binds = {};
 
   if (categoryId) {
     filters.push('c.CATEGORY_ID = :categoryId');
     binds.categoryId = categoryId;
+  }
+
+  if (username) {
+    filters.push('u.USERNAME = :username');
+    binds.username = username;
+  }
+
+  if (search) {
+    filters.push(`(
+      LOWER(w.TITLE) LIKE :searchText
+      OR LOWER(w.ALIAS) LIKE :searchText
+      OR LOWER(u.USERNAME) LIKE :searchText
+      OR LOWER(u.NICKNAME) LIKE :searchText
+      OR LOWER(p.CONTENT) LIKE :searchText
+      OR EXISTS (
+        SELECT 1 FROM POST_TAG pt
+        WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) LIKE :searchText
+      )
+    )`);
+    binds.searchText = '%' + search.toLowerCase() + '%';
   }
 
   if (afterPostId) {
@@ -288,7 +311,7 @@ function buildPostFilters({ categoryId, cursor, afterPostId }) {
 
 async function selectPostById(connection, postId, viewerId) {
   const result = await connection.execute(
-    getPostSelectSql('WHERE p.POST_ID = :postId'),
+    getPostSelectSql('WHERE p.POST_ID = :postId AND p.IS_DELETED = 0'),
     { postId, viewerId, fetchLimit: 1 },
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
   );
@@ -352,9 +375,26 @@ async function countPostRelation(connection, tableName, postId) {
   return result.rows[0]?.TOTAL_COUNT || 0;
 }
 
+async function countPostReposts(connection, postId) {
+  const result = await connection.execute(
+    `
+      SELECT
+        (
+          (SELECT COUNT(*) FROM REPOST r WHERE r.POST_ID = :postId)
+          + (SELECT COUNT(*) FROM POSTS quote WHERE quote.QUOTE_POST_ID = :postId AND quote.IS_DELETED = 0)
+        ) AS TOTAL_COUNT
+      FROM DUAL
+    `,
+    { postId },
+    { outFormat: oracledb.OUT_FORMAT_OBJECT }
+  );
+
+  return result.rows[0]?.TOTAL_COUNT || 0;
+}
+
 async function postExists(connection, postId) {
   const result = await connection.execute(
-    'SELECT POST_ID FROM POSTS WHERE POST_ID = :postId',
+    'SELECT POST_ID FROM POSTS WHERE POST_ID = :postId AND IS_DELETED = 0',
     [postId],
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
   );
@@ -384,15 +424,35 @@ async function togglePostRelation(connection, tableName, userId, postId) {
   return true;
 }
 
-async function countNewPosts(connection, { categoryId, afterPostId }) {
+async function countNewPosts(connection, { categoryId, afterPostId, username, search }) {
   if (!afterPostId) return 0;
 
-  const filters = ['p.PARENT_POST_ID IS NULL', 'p.POST_ID > :afterPostId'];
+  const filters = ['p.PARENT_POST_ID IS NULL', 'p.IS_DELETED = 0', 'p.POST_ID > :afterPostId'];
   const binds = { afterPostId };
 
   if (categoryId) {
     filters.push('c.CATEGORY_ID = :categoryId');
     binds.categoryId = categoryId;
+  }
+
+  if (username) {
+    filters.push('u.USERNAME = :username');
+    binds.username = username;
+  }
+
+  if (search) {
+    filters.push(`(
+      LOWER(w.TITLE) LIKE :searchText
+      OR LOWER(w.ALIAS) LIKE :searchText
+      OR LOWER(u.USERNAME) LIKE :searchText
+      OR LOWER(u.NICKNAME) LIKE :searchText
+      OR LOWER(p.CONTENT) LIKE :searchText
+      OR EXISTS (
+        SELECT 1 FROM POST_TAG pt
+        WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) LIKE :searchText
+      )
+    )`);
+    binds.searchText = '%' + search.toLowerCase() + '%';
   }
 
   const result = await connection.execute(
@@ -415,11 +475,13 @@ router.get('/', jwtAuthentication, async (req, res) => {
   const cursor = normalizePositiveInteger(req.query.cursor);
   const afterPostId = normalizePositiveInteger(req.query.afterPostId);
   const limit = normalizeLimit(req.query.limit);
+  const username = normalizeText(req.query.username, 50);
+  const search = normalizeText(req.query.search, 100);
   let connection;
 
   try {
     connection = await db.getConnection();
-    const { binds, whereClause } = buildPostFilters({ categoryId, cursor, afterPostId });
+    const { binds, whereClause } = buildPostFilters({ categoryId, cursor, afterPostId, username, search });
     const result = await connection.execute(
       getPostSelectSql(whereClause),
       { ...binds, viewerId: req.user.userId, fetchLimit: limit + 1 },
@@ -429,7 +491,7 @@ router.get('/', jwtAuthentication, async (req, res) => {
     const rows = result.rows.slice(0, limit);
     const posts = rows.map(mapPostRow);
     const lastPost = posts[posts.length - 1];
-    const newCount = await countNewPosts(connection, { categoryId, afterPostId });
+    const newCount = await countNewPosts(connection, { categoryId, afterPostId, username, search });
 
     return res.json({
       result: 'success',
@@ -502,7 +564,7 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
 
     if (quotePostId) {
       const quoteCheck = await connection.execute(
-        'SELECT POST_ID FROM POSTS WHERE POST_ID = :quotePostId',
+        'SELECT POST_ID FROM POSTS WHERE POST_ID = :quotePostId AND IS_DELETED = 0',
         [quotePostId],
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
@@ -561,13 +623,44 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
 
     if (req.files && req.files.length > 0) {
       await connection.executeMany(
-        'INSERT INTO POST_MEDIA (POST_ID, FILE_URL, MEDIA_TYPE, ORDER_IDX) VALUES (:postId, :fileUrl, :mediaType, :orderIdx)',
-        req.files.map((file, index) => ({
-          postId,
-          fileUrl: '/uploads/posts/' + file.filename,
-          mediaType: getMediaType(file.mimetype),
-          orderIdx: index + 1,
-        }))
+        `
+          INSERT INTO POST_MEDIA (
+            POST_ID,
+            FILE_PATH,
+            FILE_NAME,
+            ORIGIN_NAME,
+            FILE_SIZE,
+            FILE_EXT,
+            MIME_TYPE,
+            MEDIA_TYPE,
+            ORDER_IDX
+          ) VALUES (
+            :postId,
+            :filePath,
+            :fileName,
+            :originName,
+            :fileSize,
+            :fileExt,
+            :mimeType,
+            :mediaType,
+            :orderIdx
+          )
+        `,
+        req.files.map((file, index) => {
+          const fileExt = path.extname(file.originalname || file.filename || '').replace(/^\./, '').toLowerCase().slice(0, 20);
+
+          return {
+            postId,
+            filePath: '/uploads/posts/' + file.filename,
+            fileName: String(file.filename || '').slice(0, 200),
+            originName: String(file.originalname || file.filename || '').slice(0, 200),
+            fileSize: Number(file.size) || 0,
+            fileExt: fileExt || 'unknown',
+            mimeType: String(file.mimetype || '').slice(0, 100),
+            mediaType: getMediaType(file.mimetype),
+            orderIdx: index + 1,
+          };
+        })
       );
     }
 
@@ -592,6 +685,54 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
   }
 });
 
+router.get('/liked', jwtAuthentication, async (req, res) => {
+  const cursor = normalizePositiveInteger(req.query.cursor);
+  const limit = normalizeLimit(req.query.limit);
+  const username = normalizeText(req.query.username, 50);
+  let connection;
+
+  try {
+    connection = await db.getConnection();
+
+    const filters = ['p.PARENT_POST_ID IS NULL', 'p.IS_DELETED = 0'];
+    const binds = { viewerId: req.user.userId };
+
+    if (username) {
+      filters.push('liked_user.USERNAME = :username');
+      binds.username = username;
+    } else {
+      filters.push('liked_user.USER_ID = :viewerId');
+    }
+
+    if (cursor) {
+      filters.push('p.POST_ID < :cursor');
+      binds.cursor = cursor;
+    }
+
+    const result = await connection.execute(
+      getPostSelectSql('JOIN POST_LIKE current_like ON current_like.POST_ID = p.POST_ID JOIN USERS liked_user ON liked_user.USER_ID = current_like.USER_ID WHERE ' + filters.join(' AND ')),
+      { ...binds, fetchLimit: limit + 1 },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    const rows = result.rows.slice(0, limit);
+    const posts = rows.map(mapPostRow);
+    const lastPost = posts[posts.length - 1];
+
+    return res.json({
+      result: 'success',
+      posts,
+      nextCursor: result.rows.length > limit && lastPost ? lastPost.postId : null,
+      hasMore: result.rows.length > limit,
+    });
+  } catch (error) {
+    console.error('Liked post list error', error);
+    return res.status(500).json({ result: 'fail', message: '좋아요한 게시글을 불러오는 중 오류가 발생했습니다.' });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
 router.get('/bookmarks', jwtAuthentication, async (req, res) => {
   const cursor = normalizePositiveInteger(req.query.cursor);
   const limit = normalizeLimit(req.query.limit);
@@ -600,7 +741,7 @@ router.get('/bookmarks', jwtAuthentication, async (req, res) => {
   try {
     connection = await db.getConnection();
 
-    const filters = ['p.PARENT_POST_ID IS NULL'];
+    const filters = ['p.PARENT_POST_ID IS NULL', 'p.IS_DELETED = 0'];
     const binds = { viewerId: req.user.userId };
 
     if (cursor) {
@@ -670,7 +811,7 @@ router.get('/:postId/comments', jwtAuthentication, async (req, res) => {
   try {
     connection = await db.getConnection();
 
-    const filters = ['p.PARENT_POST_ID = :parentPostId'];
+    const filters = ['p.PARENT_POST_ID = :parentPostId', 'p.IS_DELETED = 0'];
     const binds = { parentPostId };
 
     if (cursor) {
@@ -717,7 +858,7 @@ router.post('/:postId/comments', jwtAuthentication, async (req, res) => {
     connection = await db.getConnection();
 
     const parentResult = await connection.execute(
-      'SELECT POST_ID, WORK_ID, PROGRESS FROM POSTS WHERE POST_ID = :parentPostId',
+      'SELECT POST_ID, WORK_ID, PROGRESS FROM POSTS WHERE POST_ID = :parentPostId AND IS_DELETED = 0',
       [parentPostId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -797,7 +938,9 @@ async function handleRelationToggle(req, res, tableName, stateKey, countKey) {
     }
 
     const enabled = await togglePostRelation(connection, tableName, req.user.userId, postId);
-    const count = await countPostRelation(connection, tableName, postId);
+    const count = tableName === 'REPOST'
+      ? await countPostReposts(connection, postId)
+      : await countPostRelation(connection, tableName, postId);
     await connection.commit();
 
     return res.json({
@@ -841,7 +984,7 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
     connection = await db.getConnection();
 
     const postCheck = await connection.execute(
-      'SELECT USER_ID FROM POSTS WHERE POST_ID = :postId',
+      'SELECT USER_ID FROM POSTS WHERE POST_ID = :postId AND IS_DELETED = 0',
       [postId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -875,6 +1018,7 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
             CONTENT = :content,
             IS_SPOILER = :isSpoiler
         WHERE POST_ID = :postId
+          AND IS_DELETED = 0
       `,
       {
         workId,
@@ -920,7 +1064,7 @@ router.delete('/:postId', jwtAuthentication, async (req, res) => {
     connection = await db.getConnection();
 
     const postCheck = await connection.execute(
-      'SELECT USER_ID FROM POSTS WHERE POST_ID = :postId',
+      'SELECT USER_ID FROM POSTS WHERE POST_ID = :postId AND IS_DELETED = 0',
       [postId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -933,16 +1077,17 @@ router.delete('/:postId', jwtAuthentication, async (req, res) => {
       return res.status(403).json({ result: 'fail', message: '\ubcf8\uc778\uc774 \uc791\uc131\ud55c \uac8c\uc2dc\uae00\ub9cc \uc0ad\uc81c\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.' });
     }
 
-    const mediaResult = await connection.execute(
-      'SELECT FILE_URL FROM POST_MEDIA WHERE POST_ID = :postId',
-      [postId],
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    await connection.execute(
+      `
+        UPDATE POSTS
+        SET IS_DELETED = 1,
+            DELETED_AT = CURRENT_TIMESTAMP
+        WHERE POST_ID = :postId
+          AND IS_DELETED = 0
+      `,
+      { postId }
     );
-    const fileUrls = mediaResult.rows.map((row) => row.FILE_URL);
-
-    await connection.execute('DELETE FROM POSTS WHERE POST_ID = :postId', [postId]);
     await connection.commit();
-    deleteStoredMediaFiles(fileUrls);
 
     return res.json({ result: 'success', message: '\uac8c\uc2dc\uae00\uc774 \uc0ad\uc81c\ub418\uc5c8\uc2b5\ub2c8\ub2e4.' });
   } catch (error) {

@@ -8,7 +8,9 @@ const sampleRouter = require("./routes/sample");
 const authRouter = require("./routes/auth");
 const categoriesRouter = require("./routes/categories");
 const userCategoriesRouter = require("./routes/userCategories");
+const usersRouter = require("./routes/users");
 const postsRouter = require("./routes/posts");
+const searchRouter = require("./routes/search");
 
 const db = require("./db");
 
@@ -25,7 +27,9 @@ app.use("/sample", sampleRouter);
 app.use("/auth", authRouter);
 app.use("/categories", categoriesRouter);
 app.use("/users/me/categories", userCategoriesRouter);
+app.use("/users", usersRouter);
 app.use("/posts", postsRouter);
+app.use("/search", searchRouter);
 
 async function startServer() {
   try {

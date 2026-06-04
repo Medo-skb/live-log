@@ -1,0 +1,328 @@
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
+import {
+  Avatar,
+  Box,
+  Button,
+  CircularProgress,
+  IconButton,
+  Popover,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
+import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
+import BookmarkBorderRoundedIcon from '@mui/icons-material/BookmarkBorderRounded';
+import BookmarkRoundedIcon from '@mui/icons-material/BookmarkRounded';
+import ChatBubbleOutlineRoundedIcon from '@mui/icons-material/ChatBubbleOutlineRounded';
+import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded';
+import MoreHorizRoundedIcon from '@mui/icons-material/MoreHorizRounded';
+import NavigateBeforeRoundedIcon from '@mui/icons-material/NavigateBeforeRounded';
+import NavigateNextRoundedIcon from '@mui/icons-material/NavigateNextRounded';
+import RepeatRoundedIcon from '@mui/icons-material/RepeatRounded';
+import { deletePost, getPost } from '../../api/postApi';
+import { useAppModal } from '../common/ModalProvider';
+
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
+const META_SEPARATOR = String.fromCharCode(183);
+
+const copy = {
+  editPost: '수정하기',
+  deletePost: '삭제하기',
+  followUser: '팔로우하기',
+  blockUser: '차단하기',
+  copyUrl: 'URL 복사',
+  reportPost: '게시물 신고하기',
+  copiedUrlTitle: 'URL이 복사되었습니다.',
+  copiedUrlBody: '게시물 링크를 클립보드에 저장했습니다.',
+  copyFailedTitle: 'URL을 복사하지 못했습니다.',
+  copyFailedBody: '아래 링크를 직접 복사해주세요.',
+  deleteConfirmTitle: '게시물을 삭제할까요?',
+  deleteConfirmBody: '이 동작은 취소할 수 없으며 내 프로필, 타임라인, 검색 결과에서 삭제됩니다.',
+  cancel: '취소',
+  nextFeatureTitle: '준비 중인 기능입니다.',
+  nextFeature: '이 기능은 다음 단계에서 API를 연결하겠습니다.',
+};
+
+function resolveMediaUrl(fileUrl) {
+  if (!fileUrl) return '';
+  return fileUrl.startsWith('http') ? fileUrl : API_BASE_URL + fileUrl;
+}
+
+function parsePostCreatedAt(createdAt) {
+  if (!createdAt) return null;
+
+  const parsedDate = new Date(String(createdAt).replace(' ', 'T'));
+  return Number.isNaN(parsedDate.getTime()) ? null : parsedDate;
+}
+
+function formatAbsoluteTime(createdAt) {
+  const createdDate = parsePostCreatedAt(createdAt);
+  if (!createdDate) return createdAt || '';
+
+  const year = createdDate.getFullYear();
+  const month = createdDate.getMonth() + 1;
+  const day = createdDate.getDate();
+  const hour = String(createdDate.getHours()).padStart(2, '0');
+  const minute = String(createdDate.getMinutes()).padStart(2, '0');
+
+  return year + '년 ' + month + '월 ' + day + '일 ' + hour + ':' + minute;
+}
+
+function formatUsername(username) {
+  return String(username || 'user');
+}
+
+function getPostDetailPath(post) {
+  return '/' + encodeURIComponent(String(post?.user?.username || 'user')) + '/status/' + post?.postId;
+}
+
+function getPhotoPath(post, photoIndex) {
+  return getPostDetailPath(post) + '/photo/' + photoIndex;
+}
+
+function getInitial(post) {
+  return String(post?.user?.nickname || post?.user?.username || 'L').charAt(0).toUpperCase();
+}
+
+function isMyPost(post, viewer) {
+  if (!post || !viewer) return false;
+  return String(post.user?.username || '') === String(viewer.username || '') || String(post.user?.userId || '') === String(viewer.userId || '');
+}
+
+function PhotoViewer() {
+  const { postId, photoIndex } = useParams();
+  const navigate = useNavigate();
+  const appModal = useAppModal();
+  const outletContext = useOutletContext() || {};
+  const { isDarkMode, user } = outletContext;
+  const [post, setPost] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+  const [menuAnchorEl, setMenuAnchorEl] = useState(null);
+
+  const menuOpen = Boolean(menuAnchorEl);
+  const mine = isMyPost(post, user);
+
+  useEffect(() => {
+    let ignore = false;
+
+    setLoading(true);
+    setError('');
+
+    getPost({ postId })
+      .then((data) => {
+        if (ignore) return;
+        setPost(data.post || null);
+      })
+      .catch((requestError) => {
+        if (!ignore) setError(requestError.message || '사진을 불러오지 못했습니다.');
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [postId]);
+
+  const imageMedia = useMemo(() => (post?.media || []).filter((media) => media.mediaType === 'IMAGE'), [post]);
+  const currentIndex = Math.max(1, Math.min(Number(photoIndex) || 1, imageMedia.length || 1));
+  const currentMedia = imageMedia[currentIndex - 1] || null;
+  const canGoPrev = currentIndex > 1;
+  const canGoNext = currentIndex < imageMedia.length;
+
+  const handleBack = () => {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+
+    if (post) {
+      navigate(getPostDetailPath(post), { replace: true });
+      return;
+    }
+
+    navigate('/home', { replace: true });
+  };
+
+  const handleMovePhoto = (nextIndex) => {
+    if (!post || nextIndex < 1 || nextIndex > imageMedia.length) return;
+    navigate(getPhotoPath(post, nextIndex), { replace: true });
+  };
+
+  const handleMenuOpen = (event) => {
+    setMenuAnchorEl(event.currentTarget);
+  };
+
+  const handleMenuClose = () => {
+    setMenuAnchorEl(null);
+  };
+
+  const handlePreparedMenuAction = () => {
+    handleMenuClose();
+    appModal.showAlert({
+      title: copy.nextFeatureTitle,
+      message: copy.nextFeature,
+    });
+  };
+
+  const handleCopyPostUrl = async () => {
+    if (!post) return;
+
+    const url = window.location.origin + getPostDetailPath(post);
+    handleMenuClose();
+
+    try {
+      await navigator.clipboard.writeText(url);
+      await appModal.showAlert({
+        title: copy.copiedUrlTitle,
+        message: copy.copiedUrlBody,
+      });
+    } catch (copyError) {
+      await appModal.showAlert({
+        title: copy.copyFailedTitle,
+        message: copy.copyFailedBody + '\n' + url,
+      });
+    }
+  };
+
+  const handleDeletePost = async () => {
+    if (!post) return;
+
+    const confirmed = await appModal.showConfirm({
+      title: copy.deleteConfirmTitle,
+      message: copy.deleteConfirmBody,
+      confirmText: copy.deletePost,
+      cancelText: copy.cancel,
+      variant: 'danger',
+    });
+
+    if (!confirmed) return;
+
+    handleMenuClose();
+
+    try {
+      await deletePost({ postId: post.postId });
+      navigate('/home', { replace: true });
+    } catch (requestError) {
+      await appModal.showAlert({
+        title: copy.nextFeatureTitle,
+        message: requestError.message || copy.nextFeature,
+      });
+    }
+  };
+
+  return (
+    <Box className="photo-viewer" component="main">
+      <Box className="photo-viewer__stage">
+        <IconButton className="photo-viewer__close" onClick={handleBack} aria-label="뒤로가기">
+          <ArrowBackRoundedIcon />
+        </IconButton>
+
+        {loading ? (
+          <Box className="photo-viewer__state"><CircularProgress size={30} /></Box>
+        ) : error || !post || !currentMedia ? (
+          <Box className="photo-viewer__state">
+            <Typography>{error || '사진을 찾을 수 없습니다.'}</Typography>
+            <Button className="photo-viewer__back-button" onClick={handleBack}>뒤로가기</Button>
+          </Box>
+        ) : (
+          <>
+            {canGoPrev && (
+              <IconButton className="photo-viewer__nav photo-viewer__nav--prev" onClick={() => handleMovePhoto(currentIndex - 1)} aria-label="이전 사진">
+                <NavigateBeforeRoundedIcon />
+              </IconButton>
+            )}
+            <img className="photo-viewer__image" alt="게시물 첨부 사진" src={resolveMediaUrl(currentMedia.fileUrl)} />
+            {canGoNext && (
+              <IconButton className="photo-viewer__nav photo-viewer__nav--next" onClick={() => handleMovePhoto(currentIndex + 1)} aria-label="다음 사진">
+                <NavigateNextRoundedIcon />
+              </IconButton>
+            )}
+            <Box className="photo-viewer__floating-actions">
+              <Button className="photo-viewer__floating-action" startIcon={<ChatBubbleOutlineRoundedIcon />}>{post.counts?.comments || 0}</Button>
+              <Button className="photo-viewer__floating-action" startIcon={<RepeatRoundedIcon />}>{post.counts?.reposts || 0}</Button>
+              <Button className="photo-viewer__floating-action" startIcon={<FavoriteBorderRoundedIcon />}>{post.counts?.likes || 0}</Button>
+              <Button aria-label="북마크" className="photo-viewer__floating-action photo-viewer__floating-action--icon" startIcon={post.bookmarked ? <BookmarkRoundedIcon /> : <BookmarkBorderRoundedIcon />} />
+            </Box>
+          </>
+        )}
+      </Box>
+
+      <Box className="photo-viewer__panel">
+        {loading ? (
+          <Box className="photo-viewer__panel-state"><CircularProgress size={24} /></Box>
+        ) : post ? (
+          <>
+            <Box className="photo-viewer__author">
+              <Avatar className="main-avatar">{getInitial(post)}</Avatar>
+              <Box className="photo-viewer__author-text">
+                <Typography className="photo-viewer__name">{post.user.nickname}</Typography>
+                <Typography className="photo-viewer__username">@{formatUsername(post.user.username)}</Typography>
+              </Box>
+              <IconButton className="main-icon-button main-icon-button--small photo-viewer__more-button" onClick={handleMenuOpen} aria-label="more">
+                <MoreHorizRoundedIcon />
+              </IconButton>
+            </Box>
+
+            {String(post.content || '').trim() && <Typography className="photo-viewer__content">{post.content}</Typography>}
+
+            {post.tags?.length > 0 && (
+              <Stack className="photo-viewer__tags" direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
+                {post.tags.map((tag) => <span className="main-tag" key={tag}>#{tag}</span>)}
+              </Stack>
+            )}
+
+            <Typography className="photo-viewer__time">{formatAbsoluteTime(post.createdAt)} {META_SEPARATOR} {post.counts?.likes || 0} 좋아요</Typography>
+
+            <Box className="photo-viewer__panel-actions">
+              <Button className="main-action-button" startIcon={<ChatBubbleOutlineRoundedIcon />}>{post.counts?.comments || 0}</Button>
+              <Button className="main-action-button" startIcon={<RepeatRoundedIcon />}>{post.counts?.reposts || 0}</Button>
+              <Button className="main-action-button" startIcon={<FavoriteBorderRoundedIcon />}>{post.counts?.likes || 0}</Button>
+              <Button aria-label="북마크" className="main-action-button photo-viewer__panel-bookmark" startIcon={post.bookmarked ? <BookmarkRoundedIcon /> : <BookmarkBorderRoundedIcon />} />
+            </Box>
+
+            <Box className="photo-viewer__reply">
+              <Avatar className="main-avatar main-avatar--comment">{getInitial(post)}</Avatar>
+              <TextField className="photo-viewer__reply-input" fullWidth placeholder="댓글 게시하기" size="small" />
+              <Button className="main-comment-submit" disabled variant="contained">답글</Button>
+            </Box>
+
+            <Popover
+              anchorEl={menuAnchorEl}
+              anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
+              className={isDarkMode ? 'main-post-menu main-post-menu--dark' : 'main-post-menu'}
+              onClose={handleMenuClose}
+              open={menuOpen}
+              transformOrigin={{ horizontal: 'right', vertical: 'top' }}
+              transitionDuration={0}
+            >
+              <Box className="main-post-menu__content" key={post.postId + '-' + (mine ? 'mine' : 'other')}>
+                {mine ? (
+                  <>
+                    <Button className="main-post-menu__item" fullWidth onClick={handlePreparedMenuAction}>{copy.editPost}</Button>
+                    <Button className="main-post-menu__item" fullWidth onClick={handleCopyPostUrl}>{copy.copyUrl}</Button>
+                    <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handleDeletePost}>{copy.deletePost}</Button>
+                  </>
+                ) : (
+                  <>
+                    <Button className="main-post-menu__item" fullWidth onClick={handlePreparedMenuAction}>{copy.followUser}</Button>
+                    <Button className="main-post-menu__item" fullWidth onClick={handleCopyPostUrl}>{copy.copyUrl}</Button>
+                    <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handlePreparedMenuAction}>{copy.blockUser}</Button>
+                  </>
+                )}
+                <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handlePreparedMenuAction}>{copy.reportPost}</Button>
+              </Box>
+            </Popover>
+          </>
+        ) : (
+          <Box className="photo-viewer__panel-state"><Typography>게시물을 찾을 수 없습니다.</Typography></Box>
+        )}
+      </Box>
+    </Box>
+  );
+}
+
+export default PhotoViewer;

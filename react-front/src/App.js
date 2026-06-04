@@ -12,9 +12,12 @@ import Follow from './components/menu/Follow';
 import Chat from './components/menu/Chat';
 import Bookmark from './components/menu/Bookmark';
 import Profile from './components/menu/Profile';
+import UserConnections from './components/menu/UserConnections';
 import PostDetail from './components/menu/PostDetail';
+import PhotoViewer from './components/menu/PhotoViewer';
 import Onboarding from './components/menu/Onboarding';
 import ProtectedRoute from './components/common/ProtectedRoute';
+import { ModalProvider } from './components/common/ModalProvider';
 import './css/layout.css';
 
 function App() {
@@ -27,7 +30,7 @@ function App() {
           <Route path="/join" element={<Join />} />
           <Route path="/verify-email" element={<EmailVerify />} />
           <Route element={<ProtectedRoute />}>
-            <Route element={<Main />}>
+            <Route element={<ModalProvider><Main /></ModalProvider>}>
               <Route path="/home" element={<Home />} />
               <Route path="/onboarding" element={<Onboarding />} />
               <Route path="/explore" element={<Explore />} />
@@ -35,7 +38,10 @@ function App() {
               <Route path="/follow" element={<Follow />} />
               <Route path="/chat" element={<Chat />} />
               <Route path="/bookmark" element={<Bookmark />} />
+              <Route path="/:username/status/:postId/photo/:photoIndex" element={<PhotoViewer />} />
               <Route path="/:username/status/:postId" element={<PostDetail />} />
+              <Route path="/:username/following" element={<UserConnections />} />
+              <Route path="/:username/followers" element={<UserConnections />} />
               <Route path="/:username" element={<Profile />} />
             </Route>
           </Route>

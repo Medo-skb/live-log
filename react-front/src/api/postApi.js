@@ -1,15 +1,22 @@
 import { apiRequest } from './apiClient';
 
-export function getPosts({ categoryId, cursor, afterPostId, limit } = {}) {
+export function getPosts({ categoryId, cursor, afterPostId, limit, username, search } = {}) {
   return apiRequest('/posts', {
     auth: true,
-    query: { categoryId, cursor, afterPostId, limit },
+    query: { categoryId, cursor, afterPostId, limit, username, search },
   });
 }
 export function getBookmarkedPosts({ cursor, limit } = {}) {
   return apiRequest('/posts/bookmarks', {
     auth: true,
     query: { cursor, limit },
+  });
+}
+
+export function getLikedPosts({ username, cursor, limit } = {}) {
+  return apiRequest('/posts/liked', {
+    auth: true,
+    query: { username, cursor, limit },
   });
 }
 export function getPost({ postId }) {
