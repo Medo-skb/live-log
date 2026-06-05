@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import {
   Avatar,
@@ -14,13 +14,23 @@ import {
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
 import BookmarkBorderRoundedIcon from '@mui/icons-material/BookmarkBorderRounded';
 import BookmarkRoundedIcon from '@mui/icons-material/BookmarkRounded';
+import EditRoundedIcon from '@mui/icons-material/EditRounded';
 import ChatBubbleOutlineRoundedIcon from '@mui/icons-material/ChatBubbleOutlineRounded';
 import FavoriteBorderRoundedIcon from '@mui/icons-material/FavoriteBorderRounded';
+import FavoriteRoundedIcon from '@mui/icons-material/FavoriteRounded';
 import MoreHorizRoundedIcon from '@mui/icons-material/MoreHorizRounded';
 import NavigateBeforeRoundedIcon from '@mui/icons-material/NavigateBeforeRounded';
 import NavigateNextRoundedIcon from '@mui/icons-material/NavigateNextRounded';
 import RepeatRoundedIcon from '@mui/icons-material/RepeatRounded';
-import { deletePost, getPost } from '../../api/postApi';
+import {
+  createPostComment,
+  deletePost,
+  getPost,
+  togglePostBookmark,
+  togglePostLike,
+  togglePostRepost,
+} from '../../api/postApi';
+import PostComposerDialog from '../post/PostComposerDialog';
 import { useAppModal } from '../common/ModalProvider';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
@@ -33,15 +43,31 @@ const copy = {
   blockUser: '차단하기',
   copyUrl: 'URL 복사',
   reportPost: '게시물 신고하기',
-  copiedUrlTitle: 'URL이 복사되었습니다.',
+  copiedUrlTitle: 'URL을 복사했습니다.',
   copiedUrlBody: '게시물 링크를 클립보드에 저장했습니다.',
   copyFailedTitle: 'URL을 복사하지 못했습니다.',
   copyFailedBody: '아래 링크를 직접 복사해주세요.',
   deleteConfirmTitle: '게시물을 삭제할까요?',
-  deleteConfirmBody: '이 동작은 취소할 수 없으며 내 프로필, 타임라인, 검색 결과에서 삭제됩니다.',
+  deleteConfirmBody: '이 동작은 취소할 수 없으며 프로필, 타임라인, 검색 결과에서 숨김 처리됩니다.',
   cancel: '취소',
   nextFeatureTitle: '준비 중인 기능입니다.',
   nextFeature: '이 기능은 다음 단계에서 API를 연결하겠습니다.',
+  requestError: '요청 처리 중 오류가 발생했습니다.',
+  loadError: '사진을 불러오지 못했습니다.',
+  notFound: '사진을 찾을 수 없습니다.',
+  postNotFound: '게시물을 찾을 수 없습니다.',
+  back: '뒤로가기',
+  imageAlt: '게시물 첨부 사진',
+  prevPhoto: '이전 사진',
+  nextPhoto: '다음 사진',
+  bookmark: '북마크',
+  likes: '좋아요',
+  commentPlaceholder: '댓글 게시하기',
+  commentSubmit: '답글',
+  commentSubmitting: '등록 중',
+  repostAction: '리포스트',
+  repostCancelAction: '리포스트 취소',
+  quoteAction: '인용하기',
 };
 
 function resolveMediaUrl(fileUrl) {
@@ -96,12 +122,19 @@ function PhotoViewer() {
   const appModal = useAppModal();
   const outletContext = useOutletContext() || {};
   const { isDarkMode, user } = outletContext;
+  const replyInputRef = useRef(null);
   const [post, setPost] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [menuAnchorEl, setMenuAnchorEl] = useState(null);
+  const [repostMenuAnchorEl, setRepostMenuAnchorEl] = useState(null);
+  const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
+  const [reactionLoadingKey, setReactionLoadingKey] = useState('');
+  const [commentDraft, setCommentDraft] = useState('');
+  const [commentSubmitting, setCommentSubmitting] = useState(false);
 
   const menuOpen = Boolean(menuAnchorEl);
+  const repostMenuOpen = Boolean(repostMenuAnchorEl);
   const mine = isMyPost(post, user);
 
   useEffect(() => {
@@ -209,17 +242,121 @@ function PhotoViewer() {
     } catch (requestError) {
       await appModal.showAlert({
         title: copy.nextFeatureTitle,
-        message: requestError.message || copy.nextFeature,
+        message: requestError.message || copy.requestError,
       });
     }
   };
 
+  const handleFocusReply = () => {
+    replyInputRef.current?.focus();
+  };
+
+  const handleToggleRelation = async (relationType) => {
+    if (!post) return;
+
+    const actionKey = relationType + '-' + post.postId;
+    if (reactionLoadingKey === actionKey) return;
+
+    const config = {
+      like: { request: togglePostLike, stateKey: 'liked', countKey: 'likes' },
+      repost: { request: togglePostRepost, stateKey: 'reposted', countKey: 'reposts' },
+      bookmark: { request: togglePostBookmark, stateKey: 'bookmarked', countKey: 'bookmarks' },
+    }[relationType];
+
+    if (!config) return;
+
+    setReactionLoadingKey(actionKey);
+    setError('');
+
+    try {
+      const data = await config.request({ postId: post.postId });
+      setPost((prevPost) => ({
+        ...prevPost,
+        [config.stateKey]: Boolean(data[config.stateKey]),
+        counts: {
+          ...prevPost.counts,
+          [config.countKey]: Number(data.count) || 0,
+        },
+      }));
+    } catch (requestError) {
+      setError(requestError.message || copy.requestError);
+    } finally {
+      setReactionLoadingKey('');
+    }
+  };
+
+
+  const handleRepostMenuOpen = (event) => {
+    setRepostMenuAnchorEl(event.currentTarget);
+  };
+
+  const handleRepostMenuClose = () => {
+    setRepostMenuAnchorEl(null);
+  };
+
+  const handleConfirmRepost = async () => {
+    handleRepostMenuClose();
+    await handleToggleRelation('repost');
+  };
+
+  const handleQuotePost = () => {
+    handleRepostMenuClose();
+    setQuoteDialogOpen(true);
+  };
+
+  const handleQuoteDialogClose = () => {
+    setQuoteDialogOpen(false);
+  };
+
+  const handleQuotePostCreated = (createdPost) => {
+    if (createdPost) {
+      window.dispatchEvent(new CustomEvent('liveLogPostCreated', { detail: createdPost }));
+    }
+  };
+
+  const handleSubmitComment = async () => {
+    const content = commentDraft.trim();
+    if (!post || !content || commentSubmitting) return;
+
+    setCommentSubmitting(true);
+    setError('');
+
+    try {
+      await createPostComment({ postId: post.postId, content, isSpoiler: false });
+      setPost((prevPost) => ({
+        ...prevPost,
+        counts: {
+          ...prevPost.counts,
+          comments: Number(prevPost.counts?.comments || 0) + 1,
+        },
+      }));
+      setCommentDraft('');
+    } catch (requestError) {
+      setError(requestError.message || copy.requestError);
+    } finally {
+      setCommentSubmitting(false);
+    }
+  };
+
+  const commentButton = (
+    <Button className="photo-viewer__floating-action" onClick={handleFocusReply} startIcon={<ChatBubbleOutlineRoundedIcon />}>{post?.counts?.comments || 0}</Button>
+  );
+  const repostButton = (
+    <Button className={post?.reposted ? 'photo-viewer__floating-action photo-viewer__floating-action--repost' : 'photo-viewer__floating-action'} disabled={reactionLoadingKey === 'repost-' + post?.postId} onClick={handleRepostMenuOpen} startIcon={<RepeatRoundedIcon />}>{post?.counts?.reposts || 0}</Button>
+  );
+  const likeButton = (
+    <Button className={post?.liked ? 'photo-viewer__floating-action photo-viewer__floating-action--like' : 'photo-viewer__floating-action'} disabled={reactionLoadingKey === 'like-' + post?.postId} onClick={() => handleToggleRelation('like')} startIcon={post?.liked ? <FavoriteRoundedIcon /> : <FavoriteBorderRoundedIcon />}>{post?.counts?.likes || 0}</Button>
+  );
+  const bookmarkButton = (
+    <Button aria-label="북마크" className={post?.bookmarked ? 'photo-viewer__floating-action photo-viewer__floating-action--bookmark photo-viewer__floating-action--icon' : 'photo-viewer__floating-action photo-viewer__floating-action--icon'} disabled={reactionLoadingKey === 'bookmark-' + post?.postId} onClick={() => handleToggleRelation('bookmark')} startIcon={post?.bookmarked ? <BookmarkRoundedIcon /> : <BookmarkBorderRoundedIcon />} />
+  );
+
   return (
     <Box className="photo-viewer" component="main">
       <Box className="photo-viewer__stage">
-        <IconButton className="photo-viewer__close" onClick={handleBack} aria-label="뒤로가기">
-          <ArrowBackRoundedIcon />
-        </IconButton>
+        <Button className="photo-viewer__back-control" onClick={handleBack} startIcon={<ArrowBackRoundedIcon />}>
+          뒤로가기
+        </Button>
 
         {loading ? (
           <Box className="photo-viewer__state"><CircularProgress size={30} /></Box>
@@ -242,10 +379,10 @@ function PhotoViewer() {
               </IconButton>
             )}
             <Box className="photo-viewer__floating-actions">
-              <Button className="photo-viewer__floating-action" startIcon={<ChatBubbleOutlineRoundedIcon />}>{post.counts?.comments || 0}</Button>
-              <Button className="photo-viewer__floating-action" startIcon={<RepeatRoundedIcon />}>{post.counts?.reposts || 0}</Button>
-              <Button className="photo-viewer__floating-action" startIcon={<FavoriteBorderRoundedIcon />}>{post.counts?.likes || 0}</Button>
-              <Button aria-label="북마크" className="photo-viewer__floating-action photo-viewer__floating-action--icon" startIcon={post.bookmarked ? <BookmarkRoundedIcon /> : <BookmarkBorderRoundedIcon />} />
+              {commentButton}
+              {repostButton}
+              {likeButton}
+              {bookmarkButton}
             </Box>
           </>
         )}
@@ -278,22 +415,22 @@ function PhotoViewer() {
             <Typography className="photo-viewer__time">{formatAbsoluteTime(post.createdAt)} {META_SEPARATOR} {post.counts?.likes || 0} 좋아요</Typography>
 
             <Box className="photo-viewer__panel-actions">
-              <Button className="main-action-button" startIcon={<ChatBubbleOutlineRoundedIcon />}>{post.counts?.comments || 0}</Button>
-              <Button className="main-action-button" startIcon={<RepeatRoundedIcon />}>{post.counts?.reposts || 0}</Button>
-              <Button className="main-action-button" startIcon={<FavoriteBorderRoundedIcon />}>{post.counts?.likes || 0}</Button>
-              <Button aria-label="북마크" className="main-action-button photo-viewer__panel-bookmark" startIcon={post.bookmarked ? <BookmarkRoundedIcon /> : <BookmarkBorderRoundedIcon />} />
+              <Button className="main-action-button" onClick={handleFocusReply} startIcon={<ChatBubbleOutlineRoundedIcon />}>{post.counts?.comments || 0}</Button>
+              <Button className={post.reposted ? 'main-action-button main-action-button--active main-action-button--repost' : 'main-action-button'} disabled={reactionLoadingKey === 'repost-' + post.postId} onClick={handleRepostMenuOpen} startIcon={<RepeatRoundedIcon />}>{post.counts?.reposts || 0}</Button>
+              <Button className={post.liked ? 'main-action-button main-action-button--active main-action-button--like' : 'main-action-button'} disabled={reactionLoadingKey === 'like-' + post.postId} onClick={() => handleToggleRelation('like')} startIcon={post.liked ? <FavoriteRoundedIcon /> : <FavoriteBorderRoundedIcon />}>{post.counts?.likes || 0}</Button>
+              <Button aria-label="북마크" className={post.bookmarked ? 'main-action-button main-action-button--active main-action-button--bookmark photo-viewer__panel-bookmark' : 'main-action-button photo-viewer__panel-bookmark'} disabled={reactionLoadingKey === 'bookmark-' + post.postId} onClick={() => handleToggleRelation('bookmark')} startIcon={post.bookmarked ? <BookmarkRoundedIcon /> : <BookmarkBorderRoundedIcon />} />
             </Box>
 
             <Box className="photo-viewer__reply">
               <Avatar className="main-avatar main-avatar--comment">{getInitial(post)}</Avatar>
-              <TextField className="photo-viewer__reply-input" fullWidth placeholder="댓글 게시하기" size="small" />
-              <Button className="main-comment-submit" disabled variant="contained">답글</Button>
+              <TextField className="photo-viewer__reply-input" fullWidth inputRef={replyInputRef} onChange={(event) => setCommentDraft(event.target.value.slice(0, 2000))} placeholder={copy.commentPlaceholder} size="small" value={commentDraft} />
+              <Button className="main-comment-submit" disabled={!commentDraft.trim() || commentSubmitting} onClick={handleSubmitComment} variant="contained">{commentSubmitting ? copy.commentSubmitting : copy.commentSubmit}</Button>
             </Box>
 
             <Popover
               anchorEl={menuAnchorEl}
               anchorOrigin={{ horizontal: 'right', vertical: 'bottom' }}
-              className={isDarkMode ? 'main-post-menu main-post-menu--dark' : 'main-post-menu'}
+              className={isDarkMode ? 'main-post-menu main-post-menu--dark photo-viewer-post-menu' : 'main-post-menu photo-viewer-post-menu'}
               onClose={handleMenuClose}
               open={menuOpen}
               transformOrigin={{ horizontal: 'right', vertical: 'top' }}
@@ -316,6 +453,38 @@ function PhotoViewer() {
                 <Button className="main-post-menu__item main-post-menu__danger" fullWidth onClick={handlePreparedMenuAction}>{copy.reportPost}</Button>
               </Box>
             </Popover>
+
+            <Popover
+              anchorEl={repostMenuAnchorEl}
+              anchorOrigin={{ horizontal: 'left', vertical: 'bottom' }}
+              className={isDarkMode ? 'main-repost-menu main-repost-menu--dark photo-viewer-repost-menu' : 'main-repost-menu photo-viewer-repost-menu'}
+              onClose={handleRepostMenuClose}
+              open={repostMenuOpen}
+              transformOrigin={{ horizontal: 'left', vertical: 'top' }}
+              transitionDuration={0}
+            >
+              <Box className="main-repost-menu__content">
+                <Button className="main-repost-menu__item" fullWidth onClick={handleConfirmRepost}>
+                  <RepeatRoundedIcon className="main-repost-menu__item-icon" />
+                  <span className="main-repost-menu__item-label">{post.reposted ? copy.repostCancelAction : copy.repostAction}</span>
+                </Button>
+                <Button className="main-repost-menu__item" fullWidth onClick={handleQuotePost}>
+                  <EditRoundedIcon className="main-repost-menu__item-icon" />
+                  <span className="main-repost-menu__item-label">{copy.quoteAction}</span>
+                </Button>
+              </Box>
+            </Popover>
+
+            <PostComposerDialog
+              avatarSrc={outletContext.avatarSrc}
+              displayName={outletContext.displayName || post.user.nickname}
+              isDarkMode={isDarkMode}
+              onClose={handleQuoteDialogClose}
+              onPostCreated={handleQuotePostCreated}
+              open={quoteDialogOpen}
+              quotePost={post}
+              user={user}
+            />
           </>
         ) : (
           <Box className="photo-viewer__panel-state"><Typography>게시물을 찾을 수 없습니다.</Typography></Box>

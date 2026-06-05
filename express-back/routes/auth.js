@@ -29,7 +29,8 @@ function createToken(user) {
       username: user.USERNAME,
       email: user.EMAIL,
       nickname: user.NICKNAME,
-      discriminator: user.DISCRIMINATOR
+      discriminator: user.DISCRIMINATOR,
+      role: user.ROLE || 'USER'
     },
     JWT_KEY,
     { expiresIn: JWT_EXPIRES_IN }
@@ -108,7 +109,7 @@ async function getUserCategories(connection, userId) {
 async function findUserByEmail(connection, email) {
   const result = await connection.execute(
     `
-      SELECT USER_ID, USERNAME, NICKNAME, DISCRIMINATOR, PASSWORD_HASH, EMAIL, EMAIL_VERIFIED
+      SELECT USER_ID, USERNAME, NICKNAME, DISCRIMINATOR, PASSWORD_HASH, EMAIL, EMAIL_VERIFIED, ROLE
       FROM USERS
       WHERE EMAIL = :email
     `,
@@ -346,7 +347,7 @@ router.post('/login', async (req, res) => {
 
     const result = await connection.execute(
       `
-        SELECT USER_ID, USERNAME, NICKNAME, DISCRIMINATOR, PASSWORD_HASH, EMAIL, EMAIL_VERIFIED
+        SELECT USER_ID, USERNAME, NICKNAME, DISCRIMINATOR, PASSWORD_HASH, EMAIL, EMAIL_VERIFIED, ROLE
         FROM USERS
         WHERE USERNAME = :username
       `,
@@ -388,7 +389,8 @@ router.post('/login', async (req, res) => {
           username: user.USERNAME,
           email: user.EMAIL,
           nickname: user.NICKNAME,
-          discriminator: user.DISCRIMINATOR
+          discriminator: user.DISCRIMINATOR,
+          role: user.ROLE || 'USER'
         }
       });
     }
@@ -407,6 +409,7 @@ router.post('/login', async (req, res) => {
         email: user.EMAIL,
         nickname: user.NICKNAME,
         discriminator: user.DISCRIMINATOR,
+        role: user.ROLE || 'USER',
         categories: userCategories
       }
     });

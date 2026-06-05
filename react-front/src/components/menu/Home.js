@@ -120,19 +120,48 @@ function isPostVisibleByCategory(post, activeCategoryId) {
   return activeCategoryId === CATEGORY_ALL_ID || post.categoryId === activeCategoryId;
 }
 
+function getTimelineKey(post) {
+  if (!post) return '';
+
+  if (post.repostedBy?.userId) {
+    return 'repost-' + post.repostedBy.userId + '-' + post.postId;
+  }
+
+  return 'post-' + post.postId;
+}
+
+function getMissingTimelinePosts(currentPosts, incomingPosts) {
+  const existingKeys = new Set(currentPosts.map(getTimelineKey));
+  return incomingPosts.filter((post) => !existingKeys.has(getTimelineKey(post)));
+}
+
+function parseTimelineCreatedAt(post) {
+  const value = post?.timelineAt || post?.createdAt;
+  const parsedDate = new Date(String(value || '').replace(' ', 'T'));
+  return Number.isNaN(parsedDate.getTime()) ? 0 : parsedDate.getTime();
+}
+
+function sortTimelinePosts(posts) {
+  return [...posts].sort((a, b) => {
+    const timeDiff = parseTimelineCreatedAt(b) - parseTimelineCreatedAt(a);
+    if (timeDiff !== 0) return timeDiff;
+    return Number(b.postId || 0) - Number(a.postId || 0);
+  });
+}
+
 function mergeUniquePosts(currentPosts, incomingPosts) {
   const postMap = new Map();
 
   [...incomingPosts, ...currentPosts].forEach((post) => {
-    postMap.set(post.postId, post);
+    postMap.set(getTimelineKey(post), post);
   });
 
-  return Array.from(postMap.values()).sort((a, b) => b.postId - a.postId);
+  return sortTimelinePosts(Array.from(postMap.values()));
 }
 
 function appendUniquePosts(currentPosts, incomingPosts) {
-  const existingIds = new Set(currentPosts.map((post) => post.postId));
-  return [...currentPosts, ...incomingPosts.filter((post) => !existingIds.has(post.postId))];
+  const existingIds = new Set(currentPosts.map(getTimelineKey));
+  return [...currentPosts, ...incomingPosts.filter((post) => !existingIds.has(getTimelineKey(post)))];
 }
 
 function formatPostUsername(username) {
@@ -155,17 +184,27 @@ function formatRelativeTime(createdAt) {
   const diffMs = Date.now() - createdDate.getTime();
   const diffMinutes = Math.floor(diffMs / 60000);
 
-  if (diffMinutes < 1) return '1\ubd84 \ubbf8\ub9cc';
-  if (diffMinutes < 60) return diffMinutes + '\ubd84 \uc804';
+  if (diffMinutes < 1) return '1분 미만';
+  if (diffMinutes < 60) return diffMinutes + '분 전';
 
   const diffHours = Math.floor(diffMinutes / 60);
-  if (diffHours < 24) return diffHours + '\uc2dc\uac04 \uc804';
+  if (diffHours < 24) return diffHours + '시간 전';
 
   return String(createdDate.getMonth() + 1) + '/' + String(createdDate.getDate());
 }
 
 function isMyPost(post, user) {
   return Number(post?.user?.userId) === Number(user?.userId);
+}
+
+function isMyRepost(post, user) {
+  return Number(post?.repostedBy?.userId) === Number(user?.userId);
+}
+
+function getRepostLabel(post, user) {
+  if (!post?.repostedBy) return '';
+  if (isMyRepost(post, user)) return '리포스트했습니다.';
+  return (post.repostedBy.nickname || post.repostedBy.username || '사용자') + ' 님이 리포스트했습니다.';
 }
 
 function getPostDetailPath(post) {
@@ -215,7 +254,6 @@ function Home() {
   const [newPostCount, setNewPostCount] = useState(0);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [checkingNewPosts, setCheckingNewPosts] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedMediaFiles, setSelectedMediaFiles] = useState([]);
@@ -234,6 +272,9 @@ function Home() {
   const mediaInputRef = useRef(null);
   const loadMoreTargetRef = useRef(null);
   const loadMoreRef = useRef(null);
+  const postsRef = useRef([]);
+  const selectedCategoryIdRef = useRef(undefined);
+  const checkingNewPostsRef = useRef(false);
 
   const userCategories = Array.isArray(user?.categories) && user.categories.length > 0
     ? user.categories
@@ -244,6 +285,14 @@ function Home() {
   const isPostMenuOpen = Boolean(postMenuAnchorEl);
   const isPostMenuMine = isMyPost(postMenuPost, user);
   const isRepostMenuOpen = Boolean(repostMenuAnchorEl);
+
+  useEffect(() => {
+    postsRef.current = posts;
+  }, [posts]);
+
+  useEffect(() => {
+    selectedCategoryIdRef.current = selectedCategoryId;
+  }, [selectedCategoryId]);
 
   useEffect(() => {
     let ignore = false;
@@ -317,25 +366,23 @@ function Home() {
   }, []);
 
   useEffect(() => {
-    const firstPostId = posts[0]?.postId;
-    if (!firstPostId) return undefined;
-
     const checkNewPosts = async () => {
-      if (checkingNewPosts) return;
+      const currentPosts = postsRef.current;
+      if (currentPosts.length === 0 || checkingNewPostsRef.current) return;
 
-      setCheckingNewPosts(true);
+      checkingNewPostsRef.current = true;
 
       try {
         const data = await getPosts({
-          categoryId: selectedCategoryId,
-          afterPostId: firstPostId,
+          categoryId: selectedCategoryIdRef.current,
           limit: PAGE_SIZE,
         });
-        setNewPostCount(Number(data.newCount) || 0);
+        const latestPosts = Array.isArray(data.posts) ? data.posts : [];
+        setNewPostCount(getMissingTimelinePosts(currentPosts, latestPosts).length);
       } catch (requestError) {
-        // 새 글 감지는 보조 기능이므로 피드 이용을 막지 않습니다.
+        // 새 포스트 확인 중 오류가 발생해도 무시합니다.
       } finally {
-        setCheckingNewPosts(false);
+        checkingNewPostsRef.current = false;
       }
     };
 
@@ -344,7 +391,7 @@ function Home() {
     return () => {
       window.clearInterval(timerId);
     };
-  }, [checkingNewPosts, posts, selectedCategoryId]);
+  }, []);
 
   useEffect(() => {
     const handleExternalPostCreated = (event) => {
@@ -393,7 +440,7 @@ function Home() {
     setSpoilerStatus(SPOILER_STATUS.ANALYZING);
 
     window.setTimeout(() => {
-      const spoilerKeywords = ['\uc8fd', '\uc0ac\ub9dd', '\ubc94\uc778', '\uacb0\ub9d0', '\ubc18\uc804', '\uc2a4\ud3ec'];
+      const spoilerKeywords = ['죽', '사망', '범인', '결말', '반전', '스포'];
       setSpoilerStatus(spoilerKeywords.some((keyword) => content.includes(keyword)) ? SPOILER_STATUS.SPOILER : SPOILER_STATUS.SAFE);
     }, 500);
   };
@@ -449,7 +496,7 @@ function Home() {
       setPosts((prevPosts) => prevPosts.filter((post) => post.postId !== targetPostId));
       if (editingPostId === targetPostId) resetComposer();
     } catch (requestError) {
-      setError(requestError.message || '\uac8c\uc2dc\uae00 \uc0ad\uc81c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4.');
+      setError(requestError.message || '게시글 삭제 중 오류가 발생했습니다.');
     }
   };
 
@@ -512,16 +559,6 @@ function Home() {
   };
 
   const handleQuotePostCreated = (post) => {
-    if (post?.quotePostId) {
-      updatePostById(post.quotePostId, (currentPost) => ({
-        ...currentPost,
-        counts: {
-          ...currentPost.counts,
-          reposts: Number(currentPost.counts?.reposts || 0) + 1,
-        },
-      }));
-    }
-
     if (post && isPostVisibleByCategory(post, activeCategoryId)) {
       setPosts((prevPosts) => mergeUniquePosts(prevPosts, [post]));
     }
@@ -562,14 +599,38 @@ function Home() {
 
     try {
       const data = await config.request({ postId: post.postId });
+      const nextCount = Number(data.count) || 0;
       updatePostById(post.postId, (currentPost) => ({
         ...currentPost,
         [config.stateKey]: Boolean(data[config.stateKey]),
         counts: {
           ...currentPost.counts,
-          [config.countKey]: Number(data.count) || 0,
+          [config.countKey]: nextCount,
         },
       }));
+
+      if (relationType === 'repost') {
+        if (data.reposted) {
+          const repostEvent = {
+            ...post,
+            reposted: true,
+            repostedBy: user,
+            timelineId: 'repost-local-' + Date.now() + '-' + post.postId,
+            timelineAt: new Date().toISOString(),
+            counts: {
+              ...post.counts,
+              reposts: nextCount,
+            },
+          };
+          setPosts((prevPosts) => mergeUniquePosts(prevPosts, [repostEvent]));
+        } else {
+          setPosts((prevPosts) => prevPosts.filter((currentPost) => !(
+            currentPost.postId === post.postId
+            && currentPost.repostedBy
+            && Number(currentPost.repostedBy.userId) === Number(user?.userId)
+          )));
+        }
+      }
     } catch (requestError) {
       setError(requestError.message || '요청 처리 중 오류가 발생했습니다.');
     } finally {
@@ -670,20 +731,24 @@ function Home() {
   };
 
   const handleLoadNewPosts = async () => {
-    const firstPostId = posts[0]?.postId;
-    if (!firstPostId || newPostCount === 0) return;
+    const currentPosts = postsRef.current;
+    if (!currentPosts.length || newPostCount === 0) return;
+
+    const maxId = Math.max(...currentPosts.map(p => Number(p.postId) || 0));
 
     setLoading(true);
     setError('');
 
     try {
       const data = await getPosts({
-        categoryId: selectedCategoryId,
-        afterPostId: firstPostId,
+        categoryId: selectedCategoryIdRef.current,
+        afterPostId: maxId,
         limit: PAGE_SIZE,
       });
       const freshPosts = Array.isArray(data.posts) ? data.posts : [];
-      setPosts((prevPosts) => mergeUniquePosts(prevPosts, freshPosts));
+      if (freshPosts.length > 0) {
+        setPosts((prevPosts) => mergeUniquePosts(prevPosts, freshPosts));
+      }
       setNewPostCount(0);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (requestError) {
@@ -720,7 +785,7 @@ function Home() {
 
       resetComposer();
     } catch (requestError) {
-      setError(requestError.message || '\uac8c\uc2dc\uae00 \ub4f1\ub85d \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4.');
+      setError(requestError.message || '게시글 등록 중 오류가 발생했습니다.');
     } finally {
       setSubmitLoading(false);
     }
@@ -833,13 +898,14 @@ function Home() {
         <>
           <Stack className="main-post-list">
             {posts.map((post) => (
-              <Box component="article" className="main-post main-post--clickable" key={post.postId} onClick={() => handleOpenPostDetail(post)} onKeyDown={(event) => { if (event.key === 'Enter') handleOpenPostDetail(post); }} role="button" tabIndex={0}>
+              <Box component="article" className="main-post main-post--clickable" key={getTimelineKey(post)} onClick={() => handleOpenPostDetail(post)} onKeyDown={(event) => { if (event.key === 'Enter') handleOpenPostDetail(post); }} role="button" tabIndex={0}>
                 <Avatar className="main-avatar">{post.user.nickname.charAt(0)}</Avatar>
                 <Box className="main-post__body">
+                  {post.repostedBy && <Typography className="main-repost-label"><RepeatRoundedIcon /> {getRepostLabel(post, user)}</Typography>}
                   <Box className="main-post__topline">
                     <Box className="main-post__author-line">
                       <Typography className="main-post__name">{post.user.nickname}</Typography>
-                      <Typography className="main-post__meta">@{formatPostUsername(post.user.username)} {'\u00b7'} {formatRelativeTime(post.createdAt)}</Typography>
+                      <Typography className="main-post__meta">@{formatPostUsername(post.user.username)} · {formatRelativeTime(post.createdAt)}</Typography>
                     </Box>
                     <IconButton aria-label="more" className="main-icon-button main-icon-button--small" onClick={(event) => { event.stopPropagation(); handlePostMenuOpen(event, post); }}><MoreHorizRoundedIcon /></IconButton>
                   </Box>
@@ -937,7 +1003,7 @@ function Home() {
                               <Box className="main-comment__body">
                                 <Box className="main-comment__meta-row">
                                   <Typography className="main-comment__name">{comment.user.nickname}</Typography>
-                                  <Typography className="main-post__meta">@{formatPostUsername(comment.user.username)} {'\u00b7'} {formatRelativeTime(comment.createdAt)}</Typography>
+                                  <Typography className="main-post__meta">@{formatPostUsername(comment.user.username)} · {formatRelativeTime(comment.createdAt)}</Typography>
                                 </Box>
                                 <Typography className="main-comment__content">{comment.content}</Typography>
                               </Box>
@@ -1017,4 +1083,3 @@ function Home() {
 }
 
 export default Home;
-

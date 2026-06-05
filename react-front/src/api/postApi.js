@@ -118,3 +118,12 @@ export function togglePostBookmark({ postId }) {
     auth: true,
   });
 }
+
+
+export function reportPost({ postId, reason }) {
+  return apiRequest('/posts/' + postId + '/reports', {
+    method: 'POST',
+    auth: true,
+    body: { reason },
+  });
+}

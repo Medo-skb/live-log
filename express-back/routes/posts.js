@@ -5,6 +5,7 @@ const multer = require('multer');
 const oracledb = require('oracledb');
 const db = require('../db');
 const jwtAuthentication = require('../auth');
+const { emitNoticeCreated } = require('../services/noticeSocket');
 
 const router = express.Router();
 const MAX_TAG_COUNT = 10;
@@ -13,6 +14,7 @@ const MAX_PROGRESS_LENGTH = 100;
 const MAX_CONTENT_LENGTH = 4000;
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 20;
+const POPULAR_POST_MIN_SCORE = 3;
 const MEDIA_LIMITS = {
   IMAGE: 10 * 1024 * 1024,
   VIDEO: 30 * 1024 * 1024,
@@ -25,7 +27,8 @@ const upload = multer({
   storage: multer.diskStorage({
     destination: (_req, _file, callback) => callback(null, uploadDir),
     filename: (_req, file, callback) => {
-      const ext = path.extname(file.originalname || '').toLowerCase();
+      const originalName = normalizeUploadOriginalName(file.originalname || '');
+      const ext = path.extname(originalName).toLowerCase();
       const safeName = Date.now() + '-' + Math.round(Math.random() * 1e9) + ext;
       callback(null, safeName);
     },
@@ -39,7 +42,7 @@ const upload = multer({
       return;
     }
 
-    callback(new Error('\uc0ac\uc9c4, \ub3d9\uc601\uc0c1 \ud30c\uc77c\ub9cc \uc5c5\ub85c\ub4dc\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.'));
+    callback(new Error('사진, 동영상 파일만 업로드할 수 있습니다.'));
   },
 });
 
@@ -47,6 +50,16 @@ function getMediaType(mimetype) {
   if (String(mimetype || '').startsWith('image/')) return 'IMAGE';
   if (String(mimetype || '').startsWith('video/')) return 'VIDEO';
   return '';
+}
+
+function normalizeUploadOriginalName(originalName) {
+  const safeBaseName = path.basename(String(originalName || 'file')) || 'file';
+  const looksLikeLatin1Mojibake = /[-ÿ]/.test(safeBaseName);
+
+  if (!looksLikeLatin1Mojibake) return safeBaseName;
+
+  const decodedName = Buffer.from(safeBaseName, 'latin1').toString('utf8');
+  return decodedName && !decodedName.includes('�') ? decodedName : safeBaseName;
 }
 
 function deleteUploadedFiles(files) {
@@ -83,13 +96,13 @@ function validateUploadedFiles(files) {
     const limit = MEDIA_LIMITS[mediaType];
 
     if (!mediaType || !limit) {
-      return '\uc0ac\uc9c4, \ub3d9\uc601\uc0c1 \ud30c\uc77c\ub9cc \uc5c5\ub85c\ub4dc\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.';
+      return '사진, 동영상 파일만 업로드할 수 있습니다.';
     }
 
     if (file.size > limit) {
       const limitMb = Math.floor(limit / 1024 / 1024);
-      const label = mediaType === 'IMAGE' ? '\uc0ac\uc9c4' : '\ub3d9\uc601\uc0c1';
-      return label + ' \ud30c\uc77c\uc740 ' + limitMb + 'MB\uae4c\uc9c0 \uc5c5\ub85c\ub4dc\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4. \uc120\ud0dd\ud55c \ud30c\uc77c: ' + file.originalname + ' (' + formatFileSize(file.size) + ')';
+      const label = mediaType === 'IMAGE' ? '사진' : '동영상';
+      return label + ' 파일은 ' + limitMb + 'MB까지 업로드할 수 있습니다. 선택한 파일: ' + normalizeUploadOriginalName(file.originalname) + ' (' + formatFileSize(file.size) + ')';
     }
   }
 
@@ -106,7 +119,7 @@ function uploadMedia(req, res, next) {
     if (req.files) deleteUploadedFiles(req.files);
 
     const message = error instanceof multer.MulterError
-      ? '\ucca8\ubd80\ud30c\uc77c \uc6a9\ub7c9\uc744 \ud655\uc778\ud574\uc8fc\uc138\uc694.'
+      ? '첨부파일 용량을 확인해주세요.'
       : error.message;
 
     res.status(400).json({
@@ -155,7 +168,7 @@ function extractTags(content, rawTags) {
 function detectSpoiler(content, isSpoiler) {
   if (Number(isSpoiler) === 1 || isSpoiler === true) return 1;
 
-  const spoilerKeywords = ['\uc8fd', '\uc0ac\ub9dd', '\ubc94\uc778', '\uacb0\ub9d0', '\ubc18\uc804', '\uc2a4\ud3ec'];
+  const spoilerKeywords = ['죽', '사망', '범인', '결말', '반전', '스포'];
   return spoilerKeywords.some((keyword) => String(content || '').includes(keyword)) ? 1 : 0;
 }
 
@@ -193,6 +206,13 @@ function mapPostRow(row) {
       likes: row.LIKE_COUNT || 0,
       bookmarks: row.BOOKMARK_COUNT || 0,
     },
+    timelineId: row.TIMELINE_ID || 'post-' + row.POST_ID,
+    timelineAt: row.TIMELINE_AT || row.CREATED_AT,
+    repostedBy: row.REPOST_USER_ID ? {
+      userId: row.REPOST_USER_ID,
+      username: row.REPOST_USERNAME,
+      nickname: row.REPOST_NICKNAME,
+    } : null,
     liked: row.LIKED_BY_ME === 1,
     reposted: row.REPOSTED_BY_ME === 1,
     bookmarked: row.BOOKMARKED_BY_ME === 1,
@@ -239,11 +259,13 @@ function getPostSelectSql(whereClause) {
         qp.CONTENT AS QUOTE_CONTENT,
         TO_CHAR(qp.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS QUOTE_CREATED_AT,
         TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS CREATED_AT,
+        'post-' || p.POST_ID AS TIMELINE_ID,
+        TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS TIMELINE_AT,
+        NULL AS REPOST_USER_ID,
+        NULL AS REPOST_USERNAME,
+        NULL AS REPOST_NICKNAME,
         (SELECT COUNT(*) FROM POSTS child WHERE child.PARENT_POST_ID = p.POST_ID AND child.IS_DELETED = 0) AS COMMENT_COUNT,
-        (
-          (SELECT COUNT(*) FROM REPOST r WHERE r.POST_ID = p.POST_ID)
-          + (SELECT COUNT(*) FROM POSTS quote WHERE quote.QUOTE_POST_ID = p.POST_ID AND quote.IS_DELETED = 0)
-        ) AS REPOST_COUNT,
+        (SELECT COUNT(*) FROM REPOST r WHERE r.POST_ID = p.POST_ID) AS REPOST_COUNT,
         (SELECT COUNT(*) FROM POST_LIKE pl WHERE pl.POST_ID = p.POST_ID) AS LIKE_COUNT,
         (SELECT COUNT(*) FROM POST_BOOKMARK pb WHERE pb.POST_ID = p.POST_ID) AS BOOKMARK_COUNT,
         CASE WHEN EXISTS (SELECT 1 FROM POST_LIKE pl WHERE pl.POST_ID = p.POST_ID AND pl.USER_ID = :viewerId) THEN 1 ELSE 0 END AS LIKED_BY_ME,
@@ -266,9 +288,27 @@ function getPostSelectSql(whereClause) {
   `;
 }
 
-function buildPostFilters({ categoryId, cursor, afterPostId, username, search }) {
+function buildPostFilters({ categoryId, cursor, afterPostId, username, search, viewerId }) {
   const filters = ['p.PARENT_POST_ID IS NULL', 'p.IS_DELETED = 0'];
   const binds = {};
+
+  if (!username && !search && viewerId) {
+    filters.push(`(
+      p.USER_ID = :postNetworkViewerId
+      OR EXISTS (
+        SELECT 1 FROM FOLLOWS viewer_following
+        WHERE viewer_following.FOLLOWER_ID = :postNetworkViewerId
+          AND viewer_following.FOLLOWING_ID = p.USER_ID
+      )
+      OR (
+        (SELECT COUNT(*) FROM POST_LIKE popular_like WHERE popular_like.POST_ID = p.POST_ID)
+        + (SELECT COUNT(*) FROM REPOST popular_repost WHERE popular_repost.POST_ID = p.POST_ID)
+        + (SELECT COUNT(*) FROM POSTS popular_comment WHERE popular_comment.PARENT_POST_ID = p.POST_ID AND popular_comment.IS_DELETED = 0)
+      ) >= :popularPostMinScore
+    )`);
+    binds.postNetworkViewerId = viewerId;
+    binds.popularPostMinScore = POPULAR_POST_MIN_SCORE;
+  }
 
   if (categoryId) {
     filters.push('c.CATEGORY_ID = :categoryId');
@@ -317,6 +357,180 @@ async function selectPostById(connection, postId, viewerId) {
   );
 
   return result.rows[0] ? mapPostRow(result.rows[0]) : null;
+}
+
+
+function getRepostSelectSql(whereClause) {
+  return `
+    SELECT * FROM (
+      SELECT
+        p.POST_ID,
+        p.USER_ID,
+        u.USERNAME,
+        u.NICKNAME,
+        u.DISCRIMINATOR,
+        c.CATEGORY_ID,
+        c.NAME AS CATEGORY_NAME,
+        w.TITLE AS WORK_TITLE,
+        p.PROGRESS,
+        p.CONTENT,
+        p.IS_SPOILER,
+        p.QUOTE_POST_ID,
+        qp.USER_ID AS QUOTE_USER_ID,
+        qu.USERNAME AS QUOTE_USERNAME,
+        qu.NICKNAME AS QUOTE_NICKNAME,
+        qc.CATEGORY_ID AS QUOTE_CATEGORY_ID,
+        qc.NAME AS QUOTE_CATEGORY_NAME,
+        qw.TITLE AS QUOTE_WORK_TITLE,
+        qp.PROGRESS AS QUOTE_PROGRESS,
+        qp.CONTENT AS QUOTE_CONTENT,
+        TO_CHAR(qp.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS QUOTE_CREATED_AT,
+        TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS CREATED_AT,
+        'repost-' || r.REPOST_ID AS TIMELINE_ID,
+        TO_CHAR(r.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS TIMELINE_AT,
+        ru.USER_ID AS REPOST_USER_ID,
+        ru.USERNAME AS REPOST_USERNAME,
+        ru.NICKNAME AS REPOST_NICKNAME,
+        (SELECT COUNT(*) FROM POSTS child WHERE child.PARENT_POST_ID = p.POST_ID AND child.IS_DELETED = 0) AS COMMENT_COUNT,
+        (SELECT COUNT(*) FROM REPOST count_repost WHERE count_repost.POST_ID = p.POST_ID) AS REPOST_COUNT,
+        (SELECT COUNT(*) FROM POST_LIKE pl WHERE pl.POST_ID = p.POST_ID) AS LIKE_COUNT,
+        (SELECT COUNT(*) FROM POST_BOOKMARK pb WHERE pb.POST_ID = p.POST_ID) AS BOOKMARK_COUNT,
+        CASE WHEN EXISTS (SELECT 1 FROM POST_LIKE pl WHERE pl.POST_ID = p.POST_ID AND pl.USER_ID = :viewerId) THEN 1 ELSE 0 END AS LIKED_BY_ME,
+        CASE WHEN EXISTS (SELECT 1 FROM REPOST viewer_repost WHERE viewer_repost.POST_ID = p.POST_ID AND viewer_repost.USER_ID = :viewerId) THEN 1 ELSE 0 END AS REPOSTED_BY_ME,
+        CASE WHEN EXISTS (SELECT 1 FROM POST_BOOKMARK pb WHERE pb.POST_ID = p.POST_ID AND pb.USER_ID = :viewerId) THEN 1 ELSE 0 END AS BOOKMARKED_BY_ME,
+        (SELECT LISTAGG(pt.TAG, ',') WITHIN GROUP (ORDER BY pt.TAG) FROM POST_TAG pt WHERE pt.POST_ID = p.POST_ID) AS TAGS,
+        (SELECT LISTAGG(pm.MEDIA_ID || ':' || pm.MEDIA_TYPE || ':' || pm.FILE_PATH, '|') WITHIN GROUP (ORDER BY pm.ORDER_IDX) FROM POST_MEDIA pm WHERE pm.POST_ID = p.POST_ID) AS MEDIA_FILES
+      FROM REPOST r
+      JOIN POSTS p ON p.POST_ID = r.POST_ID
+      JOIN USERS ru ON ru.USER_ID = r.USER_ID
+      JOIN USERS u ON u.USER_ID = p.USER_ID
+      JOIN WORKS w ON w.WORK_ID = p.WORK_ID
+      JOIN CATEGORY c ON c.CATEGORY_ID = w.CATEGORY_ID
+      LEFT JOIN POSTS qp ON qp.POST_ID = p.QUOTE_POST_ID AND qp.IS_DELETED = 0
+      LEFT JOIN USERS qu ON qu.USER_ID = qp.USER_ID
+      LEFT JOIN WORKS qw ON qw.WORK_ID = qp.WORK_ID
+      LEFT JOIN CATEGORY qc ON qc.CATEGORY_ID = qw.CATEGORY_ID
+      ${whereClause}
+      ORDER BY r.REPOST_ID DESC
+    )
+    WHERE ROWNUM <= :fetchLimit
+  `;
+}
+
+function buildRepostFilters({ categoryId, cursor, afterPostId, username, search, viewerId }) {
+  const filters = ['p.PARENT_POST_ID IS NULL', 'p.IS_DELETED = 0'];
+  const binds = {};
+
+  if (!username && !search && viewerId) {
+    filters.push(`(
+      r.USER_ID = :networkViewerId
+      OR EXISTS (
+        SELECT 1 FROM FOLLOWS viewer_following
+        WHERE viewer_following.FOLLOWER_ID = :networkViewerId
+          AND viewer_following.FOLLOWING_ID = r.USER_ID
+      )
+      OR EXISTS (
+        SELECT 1 FROM FOLLOWS viewer_follower
+        WHERE viewer_follower.FOLLOWER_ID = r.USER_ID
+          AND viewer_follower.FOLLOWING_ID = :networkViewerId
+      )
+    )`);
+    binds.networkViewerId = viewerId;
+  }
+
+  if (categoryId) {
+    filters.push('c.CATEGORY_ID = :categoryId');
+    binds.categoryId = categoryId;
+  }
+
+  if (username) {
+    filters.push('ru.USERNAME = :username');
+    binds.username = username;
+  }
+
+  if (search) {
+    filters.push(`(
+      LOWER(w.TITLE) LIKE :searchText
+      OR LOWER(w.ALIAS) LIKE :searchText
+      OR LOWER(u.USERNAME) LIKE :searchText
+      OR LOWER(u.NICKNAME) LIKE :searchText
+      OR LOWER(ru.USERNAME) LIKE :searchText
+      OR LOWER(ru.NICKNAME) LIKE :searchText
+      OR LOWER(p.CONTENT) LIKE :searchText
+      OR EXISTS (
+        SELECT 1 FROM POST_TAG pt
+        WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) LIKE :searchText
+      )
+    )`);
+    binds.searchText = '%' + search.toLowerCase() + '%';
+  }
+
+  if (afterPostId) {
+    filters.push('r.REPOST_ID > :afterPostId');
+    binds.afterPostId = afterPostId;
+  } else if (cursor) {
+    filters.push('r.REPOST_ID < :cursor');
+    binds.cursor = cursor;
+  }
+
+  return {
+    binds,
+    whereClause: filters.length > 0 ? 'WHERE ' + filters.join(' AND ') : '',
+  };
+}
+
+function parseTimelineTime(value) {
+  const date = new Date(String(value || '').replace(' ', 'T'));
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime();
+}
+
+function getTimelineSortNumber(post) {
+  return Number(String(post.timelineId || '').split('-')[1]) || Number(post.postId) || 0;
+}
+
+function sortTimelinePosts(posts) {
+  return posts.sort((a, b) => {
+    const timeDiff = parseTimelineTime(b.timelineAt) - parseTimelineTime(a.timelineAt);
+    if (timeDiff !== 0) return timeDiff;
+    return getTimelineSortNumber(b) - getTimelineSortNumber(a);
+  });
+}
+
+async function createNotice(connection, { receiverId, senderId, type, targetType, targetId, allowDuplicate = false }) {
+  if (!receiverId || !senderId || Number(receiverId) === Number(senderId)) return null;
+
+  const noticeLookup = { receiverId, senderId, type, targetType, targetId };
+
+  if (allowDuplicate) {
+    const inserted = await connection.execute(
+      `
+        INSERT INTO NOTICE (RECEIVER_ID, SENDER_ID, NOTIFICATION_TYPE, TARGET_TYPE, TARGET_ID)
+        VALUES (:receiverId, :senderId, :type, :targetType, :targetId)
+      `,
+      { receiverId, senderId, type, targetType, targetId }
+    );
+
+    return inserted.rowsAffected > 0 ? noticeLookup : null;
+  }
+
+  const inserted = await connection.execute(
+    `
+      INSERT INTO NOTICE (RECEIVER_ID, SENDER_ID, NOTIFICATION_TYPE, TARGET_TYPE, TARGET_ID)
+      SELECT :receiverId, :senderId, :type, :targetType, :targetId
+      FROM DUAL
+      WHERE NOT EXISTS (
+        SELECT 1 FROM NOTICE n
+        WHERE n.RECEIVER_ID = :receiverId
+          AND n.SENDER_ID = :senderId
+          AND n.NOTIFICATION_TYPE = :type
+          AND NVL(n.TARGET_TYPE, 'NONE') = NVL(:targetType, 'NONE')
+          AND NVL(n.TARGET_ID, -1) = NVL(:targetId, -1)
+      )
+    `,
+    { receiverId, senderId, type, targetType, targetId }
+  );
+
+  return inserted.rowsAffected > 0 ? noticeLookup : null;
 }
 
 async function findOrCreateWork(connection, categoryId, title) {
@@ -376,20 +590,17 @@ async function countPostRelation(connection, tableName, postId) {
 }
 
 async function countPostReposts(connection, postId) {
+  return countPostRelation(connection, 'REPOST', postId);
+}
+
+async function findPostOwnerId(connection, postId) {
   const result = await connection.execute(
-    `
-      SELECT
-        (
-          (SELECT COUNT(*) FROM REPOST r WHERE r.POST_ID = :postId)
-          + (SELECT COUNT(*) FROM POSTS quote WHERE quote.QUOTE_POST_ID = :postId AND quote.IS_DELETED = 0)
-        ) AS TOTAL_COUNT
-      FROM DUAL
-    `,
-    { postId },
+    'SELECT USER_ID FROM POSTS WHERE POST_ID = :postId AND IS_DELETED = 0',
+    [postId],
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
   );
 
-  return result.rows[0]?.TOTAL_COUNT || 0;
+  return result.rows[0]?.USER_ID || null;
 }
 
 async function postExists(connection, postId) {
@@ -424,44 +635,20 @@ async function togglePostRelation(connection, tableName, userId, postId) {
   return true;
 }
 
-async function countNewPosts(connection, { categoryId, afterPostId, username, search }) {
+async function countNewPosts(connection, { categoryId, afterPostId, username, search, viewerId }) {
   if (!afterPostId) return 0;
 
-  const filters = ['p.PARENT_POST_ID IS NULL', 'p.IS_DELETED = 0', 'p.POST_ID > :afterPostId'];
-  const binds = { afterPostId };
-
-  if (categoryId) {
-    filters.push('c.CATEGORY_ID = :categoryId');
-    binds.categoryId = categoryId;
-  }
-
-  if (username) {
-    filters.push('u.USERNAME = :username');
-    binds.username = username;
-  }
-
-  if (search) {
-    filters.push(`(
-      LOWER(w.TITLE) LIKE :searchText
-      OR LOWER(w.ALIAS) LIKE :searchText
-      OR LOWER(u.USERNAME) LIKE :searchText
-      OR LOWER(u.NICKNAME) LIKE :searchText
-      OR LOWER(p.CONTENT) LIKE :searchText
-      OR EXISTS (
-        SELECT 1 FROM POST_TAG pt
-        WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) LIKE :searchText
-      )
-    )`);
-    binds.searchText = '%' + search.toLowerCase() + '%';
-  }
+  // 목록 조회와 동일한 필터 빌더를 사용하여 권한/가시성이 있는 포스트만 카운트합니다.
+  const { binds, whereClause } = buildPostFilters({ categoryId, afterPostId, username, search, viewerId });
 
   const result = await connection.execute(
     `
       SELECT COUNT(*) AS NEW_COUNT
       FROM POSTS p
+      JOIN USERS u ON u.USER_ID = p.USER_ID
       JOIN WORKS w ON w.WORK_ID = p.WORK_ID
       JOIN CATEGORY c ON c.CATEGORY_ID = w.CATEGORY_ID
-      WHERE ${filters.join(' AND ')}
+      ${whereClause}
     `,
     binds,
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -481,30 +668,42 @@ router.get('/', jwtAuthentication, async (req, res) => {
 
   try {
     connection = await db.getConnection();
-    const { binds, whereClause } = buildPostFilters({ categoryId, cursor, afterPostId, username, search });
-    const result = await connection.execute(
-      getPostSelectSql(whereClause),
-      { ...binds, viewerId: req.user.userId, fetchLimit: limit + 1 },
-      { outFormat: oracledb.OUT_FORMAT_OBJECT }
-    );
+    const { binds, whereClause } = buildPostFilters({ categoryId, cursor, afterPostId, username, search, viewerId: req.user.userId });
+    const repostFilter = buildRepostFilters({ categoryId, cursor, afterPostId, username, search, viewerId: req.user.userId });
+    const [postResult, repostResult] = await Promise.all([
+      connection.execute(
+        getPostSelectSql(whereClause),
+        { ...binds, viewerId: req.user.userId, fetchLimit: limit + 1 },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      ),
+      connection.execute(
+        getRepostSelectSql(repostFilter.whereClause),
+        { ...repostFilter.binds, viewerId: req.user.userId, fetchLimit: limit + 1 },
+        { outFormat: oracledb.OUT_FORMAT_OBJECT }
+      ),
+    ]);
 
-    const rows = result.rows.slice(0, limit);
-    const posts = rows.map(mapPostRow);
+    const timelinePosts = sortTimelinePosts([
+      ...postResult.rows.map(mapPostRow),
+      ...repostResult.rows.map(mapPostRow),
+    ]);
+    const posts = timelinePosts.slice(0, limit);
     const lastPost = posts[posts.length - 1];
-    const newCount = await countNewPosts(connection, { categoryId, afterPostId, username, search });
+    const hasMore = timelinePosts.length > limit || postResult.rows.length > limit || repostResult.rows.length > limit;
+    const newCount = await countNewPosts(connection, { categoryId, afterPostId, username, search, viewerId: req.user.userId });
 
     return res.json({
       result: 'success',
       posts,
-      nextCursor: result.rows.length > limit && lastPost ? lastPost.postId : null,
-      hasMore: result.rows.length > limit,
+      nextCursor: hasMore && lastPost ? getTimelineSortNumber(lastPost) : null,
+      hasMore,
       newCount,
     });
   } catch (error) {
     console.error('Post list error', error);
     return res.status(500).json({
       result: 'fail',
-      message: '\uac8c\uc2dc\uae00 \ubaa9\ub85d\uc744 \ubd88\ub7ec\uc624\ub294 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4.',
+      message: '게시글 목록을 불러오는 중 오류가 발생했습니다.',
     });
   } finally {
     if (connection) await connection.close();
@@ -537,7 +736,7 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
     deleteUploadedFiles(req.files);
     return res.status(400).json({
       result: 'fail',
-      message: '\uce74\ud14c\uace0\ub9ac, \uc791\ud488\uba85, \uc9c4\ub3c4, \ub0b4\uc6a9\uc744 \ubaa8\ub450 \uc785\ub825\ud574\uc8fc\uc138\uc694.',
+      message: '카테고리, 작품명, 진도, 내용을 모두 입력해주세요.',
     });
   }
 
@@ -558,7 +757,7 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
       deleteUploadedFiles(req.files);
       return res.status(400).json({
         result: 'fail',
-        message: '\uc874\uc7ac\ud558\uc9c0 \uc54a\ub294 \uce74\ud14c\uace0\ub9ac\uc785\ub2c8\ub2e4.',
+        message: '존재하지 않는 카테고리입니다.',
       });
     }
 
@@ -647,13 +846,14 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
           )
         `,
         req.files.map((file, index) => {
-          const fileExt = path.extname(file.originalname || file.filename || '').replace(/^\./, '').toLowerCase().slice(0, 20);
+          const originalName = normalizeUploadOriginalName(file.originalname || file.filename || '');
+          const fileExt = path.extname(originalName || file.filename || '').replace(/^\./, '').toLowerCase().slice(0, 20);
 
           return {
             postId,
             filePath: '/uploads/posts/' + file.filename,
             fileName: String(file.filename || '').slice(0, 200),
-            originName: String(file.originalname || file.filename || '').slice(0, 200),
+            originName: String(originalName || file.filename || '').slice(0, 200),
             fileSize: Number(file.size) || 0,
             fileExt: fileExt || 'unknown',
             mimeType: String(file.mimetype || '').slice(0, 100),
@@ -669,7 +869,7 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
 
     return res.status(201).json({
       result: 'success',
-      message: '\uac8c\uc2dc\uae00\uc774 \ub4f1\ub85d\ub418\uc5c8\uc2b5\ub2c8\ub2e4.',
+      message: '게시글이 등록되었습니다.',
       post,
     });
   } catch (error) {
@@ -678,7 +878,7 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
     console.error('Post create error', error);
     return res.status(500).json({
       result: 'fail',
-      message: '\uac8c\uc2dc\uae00 \ub4f1\ub85d \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4.',
+      message: '게시글 등록 중 오류가 발생했습니다.',
     });
   } finally {
     if (connection) await connection.close();
@@ -773,6 +973,48 @@ router.get('/bookmarks', jwtAuthentication, async (req, res) => {
   }
 });
 
+
+router.post('/:postId/reports', jwtAuthentication, async (req, res) => {
+  const postId = normalizePositiveInteger(req.params.postId);
+  const reason = normalizeText(req.body.reason, 500) || '부적절한 내용';
+  let connection;
+
+  if (!postId) {
+    return res.status(400).json({ result: 'fail', message: '게시글 정보가 올바르지 않습니다.' });
+  }
+
+  try {
+    connection = await db.getConnection();
+
+    const postResult = await connection.execute(
+      'SELECT POST_ID FROM POSTS WHERE POST_ID = :postId AND IS_DELETED = 0',
+      { postId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (postResult.rows.length === 0) {
+      return res.status(404).json({ result: 'fail', message: '존재하지 않는 게시글입니다.' });
+    }
+
+    await connection.execute(
+      'INSERT INTO REPORT (REPORTER_ID, TARGET_POST_ID, REASON) VALUES (:reporterId, :postId, :reason)',
+      { reporterId: req.user.userId, postId, reason }
+    );
+    await connection.commit();
+
+    return res.status(201).json({ result: 'success', message: '신고가 접수되었습니다.' });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    if (error.errorNum === 1) {
+      return res.status(409).json({ result: 'fail', message: '이미 신고한 게시글입니다.' });
+    }
+    console.error('Post report error', error);
+    return res.status(500).json({ result: 'fail', message: '신고 처리 중 서버 오류가 발생했습니다.' });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
 router.get('/:postId', jwtAuthentication, async (req, res) => {
   const postId = normalizePositiveInteger(req.params.postId);
   let connection;
@@ -858,7 +1100,7 @@ router.post('/:postId/comments', jwtAuthentication, async (req, res) => {
     connection = await db.getConnection();
 
     const parentResult = await connection.execute(
-      'SELECT POST_ID, WORK_ID, PROGRESS FROM POSTS WHERE POST_ID = :parentPostId AND IS_DELETED = 0',
+      'SELECT POST_ID, USER_ID, WORK_ID, PROGRESS FROM POSTS WHERE POST_ID = :parentPostId AND IS_DELETED = 0',
       [parentPostId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -909,7 +1151,17 @@ router.post('/:postId/comments', jwtAuthentication, async (req, res) => {
       );
     }
 
+    const noticeLookup = await createNotice(connection, {
+      receiverId: parentPost.USER_ID,
+      senderId: req.user.userId,
+      type: 'COMMENT',
+      targetType: 'POST',
+      targetId: parentPostId,
+      allowDuplicate: true,
+    });
+
     await connection.commit();
+    await emitNoticeCreated(connection, noticeLookup);
     const comment = await selectPostById(connection, postId, req.user.userId);
 
     return res.status(201).json({ result: 'success', message: '댓글이 등록되었습니다.', comment });
@@ -941,7 +1193,22 @@ async function handleRelationToggle(req, res, tableName, stateKey, countKey) {
     const count = tableName === 'REPOST'
       ? await countPostReposts(connection, postId)
       : await countPostRelation(connection, tableName, postId);
+
+    let noticeLookup = null;
+
+    if (enabled && (tableName === 'POST_LIKE' || tableName === 'REPOST')) {
+      const ownerId = await findPostOwnerId(connection, postId);
+      noticeLookup = await createNotice(connection, {
+        receiverId: ownerId,
+        senderId: req.user.userId,
+        type: tableName === 'POST_LIKE' ? 'LIKE' : 'REPOST',
+        targetType: 'POST',
+        targetId: postId,
+      });
+    }
+
     await connection.commit();
+    await emitNoticeCreated(connection, noticeLookup);
 
     return res.json({
       result: 'success',
@@ -973,11 +1240,11 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
   let connection;
 
   if (!postId) {
-    return res.status(400).json({ result: 'fail', message: '\uac8c\uc2dc\uae00 \uc815\ubcf4\uac00 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.' });
+    return res.status(400).json({ result: 'fail', message: '게시글 정보가 올바르지 않습니다.' });
   }
 
   if (!categoryId || isEmpty(workTitle) || isEmpty(progress) || isEmpty(content)) {
-    return res.status(400).json({ result: 'fail', message: '\uce74\ud14c\uace0\ub9ac, \uc791\ud488\uba85, \uc9c4\ub3c4, \ub0b4\uc6a9\uc744 \ubaa8\ub450 \uc785\ub825\ud574\uc8fc\uc138\uc694.' });
+    return res.status(400).json({ result: 'fail', message: '카테고리, 작품명, 진도, 내용을 모두 입력해주세요.' });
   }
 
   try {
@@ -990,11 +1257,11 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
     );
 
     if (postCheck.rows.length === 0) {
-      return res.status(404).json({ result: 'fail', message: '\uc874\uc7ac\ud558\uc9c0 \uc54a\ub294 \uac8c\uc2dc\uae00\uc785\ub2c8\ub2e4.' });
+      return res.status(404).json({ result: 'fail', message: '존재하지 않는 게시글입니다.' });
     }
 
     if (postCheck.rows[0].USER_ID !== req.user.userId) {
-      return res.status(403).json({ result: 'fail', message: '\ubcf8\uc778\uc774 \uc791\uc131\ud55c \uac8c\uc2dc\uae00\ub9cc \uc218\uc815\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.' });
+      return res.status(403).json({ result: 'fail', message: '본인이 작성한 게시글만 수정할 수 있습니다.' });
     }
 
     const categoryCheck = await connection.execute(
@@ -1004,7 +1271,7 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
     );
 
     if (categoryCheck.rows.length === 0) {
-      return res.status(400).json({ result: 'fail', message: '\uc874\uc7ac\ud558\uc9c0 \uc54a\ub294 \uce74\ud14c\uace0\ub9ac\uc785\ub2c8\ub2e4.' });
+      return res.status(400).json({ result: 'fail', message: '존재하지 않는 카테고리입니다.' });
     }
 
     const workId = await findOrCreateWork(connection, categoryId, workTitle);
@@ -1042,11 +1309,11 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
     await connection.commit();
     const post = await selectPostById(connection, postId, req.user.userId);
 
-    return res.json({ result: 'success', message: '\uac8c\uc2dc\uae00\uc774 \uc218\uc815\ub418\uc5c8\uc2b5\ub2c8\ub2e4.', post });
+    return res.json({ result: 'success', message: '게시글이 수정되었습니다.', post });
   } catch (error) {
     if (connection) await connection.rollback();
     console.error('Post update error', error);
-    return res.status(500).json({ result: 'fail', message: '\uac8c\uc2dc\uae00 \uc218\uc815 \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4.' });
+    return res.status(500).json({ result: 'fail', message: '게시글 수정 중 오류가 발생했습니다.' });
   } finally {
     if (connection) await connection.close();
   }
@@ -1057,7 +1324,7 @@ router.delete('/:postId', jwtAuthentication, async (req, res) => {
   let connection;
 
   if (!postId) {
-    return res.status(400).json({ result: 'fail', message: '\uac8c\uc2dc\uae00 \uc815\ubcf4\uac00 \uc62c\ubc14\ub974\uc9c0 \uc54a\uc2b5\ub2c8\ub2e4.' });
+    return res.status(400).json({ result: 'fail', message: '게시글 정보가 올바르지 않습니다.' });
   }
 
   try {
@@ -1070,11 +1337,11 @@ router.delete('/:postId', jwtAuthentication, async (req, res) => {
     );
 
     if (postCheck.rows.length === 0) {
-      return res.status(404).json({ result: 'fail', message: '\uc874\uc7ac\ud558\uc9c0 \uc54a\ub294 \uac8c\uc2dc\uae00\uc785\ub2c8\ub2e4.' });
+      return res.status(404).json({ result: 'fail', message: '존재하지 않는 게시글입니다.' });
     }
 
     if (postCheck.rows[0].USER_ID !== req.user.userId) {
-      return res.status(403).json({ result: 'fail', message: '\ubcf8\uc778\uc774 \uc791\uc131\ud55c \uac8c\uc2dc\uae00\ub9cc \uc0ad\uc81c\ud560 \uc218 \uc788\uc2b5\ub2c8\ub2e4.' });
+      return res.status(403).json({ result: 'fail', message: '본인이 작성한 게시글만 삭제할 수 있습니다.' });
     }
 
     await connection.execute(
@@ -1089,14 +1356,13 @@ router.delete('/:postId', jwtAuthentication, async (req, res) => {
     );
     await connection.commit();
 
-    return res.json({ result: 'success', message: '\uac8c\uc2dc\uae00\uc774 \uc0ad\uc81c\ub418\uc5c8\uc2b5\ub2c8\ub2e4.' });
+    return res.json({ result: 'success', message: '게시글이 삭제되었습니다.' });
   } catch (error) {
     if (connection) await connection.rollback();
     console.error('Post delete error', error);
-    return res.status(500).json({ result: 'fail', message: '\uac8c\uc2dc\uae00 \uc0ad\uc81c \uc911 \uc624\ub958\uac00 \ubc1c\uc0dd\ud588\uc2b5\ub2c8\ub2e4.' });
+    return res.status(500).json({ result: 'fail', message: '게시글 삭제 중 오류가 발생했습니다.' });
   } finally {
     if (connection) await connection.close();
   }
 });
 module.exports = router;
-

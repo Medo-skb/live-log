@@ -16,6 +16,7 @@ import UserConnections from './components/menu/UserConnections';
 import PostDetail from './components/menu/PostDetail';
 import PhotoViewer from './components/menu/PhotoViewer';
 import Onboarding from './components/menu/Onboarding';
+import Admin from './components/menu/Admin';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import { ModalProvider } from './components/common/ModalProvider';
 import './css/layout.css';
@@ -38,6 +39,7 @@ function App() {
               <Route path="/follow" element={<Follow />} />
               <Route path="/chat" element={<Chat />} />
               <Route path="/bookmark" element={<Bookmark />} />
+              <Route path="/admin" element={<Admin />} />
               <Route path="/:username/status/:postId/photo/:photoIndex" element={<PhotoViewer />} />
               <Route path="/:username/status/:postId" element={<PostDetail />} />
               <Route path="/:username/following" element={<UserConnections />} />

@@ -45,12 +45,38 @@ const copy = {
   blockUser: '차단하기',
   copyUrl: 'URL 복사',
   reportPost: '게시물 신고하기',
-  copiedUrlTitle: 'URL이 복사되었습니다.',
+  copiedUrlTitle: 'URL을 복사했습니다.',
   copiedUrlBody: '게시물 링크를 클립보드에 저장했습니다.',
   copyFailedTitle: 'URL을 복사하지 못했습니다.',
   copyFailedBody: '아래 링크를 직접 복사해주세요.',
+  deleteConfirmTitle: '게시물을 삭제할까요?',
+  deleteConfirmBody: '이 동작은 취소할 수 없으며 프로필, 타임라인, 검색 결과에서 숨김 처리됩니다.',
+  cancel: '취소',
   nextFeatureTitle: '준비 중인 기능입니다.',
   nextFeature: 'DB 정책과 API를 정리한 뒤 연결하겠습니다.',
+  requestError: '요청 처리 중 오류가 발생했습니다.',
+  loadError: '게시글을 불러오지 못했습니다.',
+  commentLoadError: '댓글을 불러오지 못했습니다.',
+  commentSubmitError: '댓글 등록 중 오류가 발생했습니다.',
+  repostAction: '리포스트',
+  repostCancelAction: '리포스트 취소',
+  quoteAction: '인용하기',
+  saved: '저장됨',
+  save: '저장',
+  spoiler: '스포일러',
+  postTitle: '게시물',
+  back: '뒤로가기',
+  notFound: '게시글을 찾을 수 없습니다.',
+  comments: '댓글',
+  reposts: '리포스트',
+  likes: '좋아요',
+  bookmarks: '북마크',
+  replyPlaceholder: '댓글 게시하기',
+  replySubmit: '댓글',
+  replySubmitting: '등록 중',
+  emptyComments: '아직 댓글이 없습니다.',
+  loadMoreComments: '댓글 더 보기',
+  loadingMore: '불러오는 중',
 };
 
 function resolveMediaUrl(fileUrl) {
@@ -109,11 +135,24 @@ function isMyPost(post, viewer) {
   return String(post.user?.username || '') === String(viewer.username || '') || String(post.user?.userId || '') === String(viewer.userId || '');
 }
 
-function QuotePostCard({ post }) {
+function QuotePostCard({ onOpen, post }) {
   if (!post) return null;
 
+  const handleKeyDown = (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      onOpen?.();
+    }
+  };
+
   return (
-    <Box className="main-quote-preview-card main-quote-preview-card--embedded">
+    <Box
+      className="main-quote-preview-card main-quote-preview-card--embedded main-quote-preview-card--clickable"
+      onClick={onOpen}
+      onKeyDown={handleKeyDown}
+      role="button"
+      tabIndex={0}
+    >
       <Box className="main-quote-preview-card__author">
         <Avatar className="main-avatar main-avatar--quote">{post.user.nickname.charAt(0)}</Avatar>
         <Box className="main-quote-preview-card__author-text">
@@ -252,6 +291,11 @@ function PostDetail() {
     navigate(getPostPhotoPath(post, photoIndex));
   };
 
+  const handleOpenQuotePost = () => {
+    if (!post?.quotePost?.postId) return;
+    navigate(getPostDetailPath(post.quotePost));
+  };
+
   const handleRepostMenuOpen = (event) => {
     setRepostMenuAnchorEl(event.currentTarget);
   };
@@ -275,16 +319,6 @@ function PostDetail() {
   };
 
   const handleQuotePostCreated = (createdPost) => {
-    if (createdPost?.quotePostId === post?.postId) {
-      setPost((prevPost) => ({
-        ...prevPost,
-        counts: {
-          ...prevPost.counts,
-          reposts: Number(prevPost.counts?.reposts || 0) + 1,
-        },
-      }));
-    }
-
     if (createdPost) {
       window.dispatchEvent(new CustomEvent('liveLogPostCreated', { detail: createdPost }));
     }
@@ -427,7 +461,7 @@ function PostDetail() {
               </Box>
             )}
 
-            {post.quotePost && <QuotePostCard post={post.quotePost} />}
+            {post.quotePost && <QuotePostCard onOpen={handleOpenQuotePost} post={post.quotePost} />}
 
             {post.tags.length > 0 && (
               <Stack className="main-tag-row" direction="row" spacing={0.75}>
@@ -510,8 +544,8 @@ function PostDetail() {
             transitionDuration={0}
           >
             <Box className="main-repost-menu__content">
-              <Button className="main-repost-menu__item" fullWidth onClick={handleConfirmRepost} startIcon={<RepeatRoundedIcon />}>재게시</Button>
-              <Button className="main-repost-menu__item" fullWidth onClick={handleQuotePost} startIcon={<EditRoundedIcon />}>인용하세요</Button>
+              <Button className="main-repost-menu__item" fullWidth onClick={handleConfirmRepost} startIcon={<RepeatRoundedIcon />}>{post.reposted ? copy.repostCancelAction : copy.repostAction}</Button>
+              <Button className="main-repost-menu__item" fullWidth onClick={handleQuotePost} startIcon={<EditRoundedIcon />}>{copy.quoteAction}</Button>
             </Box>
           </Popover>
 

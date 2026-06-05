@@ -19,10 +19,41 @@ export function getUserConnections({ username, type }) {
   });
 }
 
-export function updateUserProfile({ username, nickname }) {
+export function updateUserProfile({ username, nickname, bio, profileImage, bannerImage }) {
+  const hasFile = profileImage || bannerImage;
+
+  if (hasFile) {
+    const formData = new FormData();
+    formData.append('nickname', nickname);
+    formData.append('bio', bio || '');
+    if (profileImage) formData.append('profileImage', profileImage);
+    if (bannerImage) formData.append('bannerImage', bannerImage);
+
+    return apiRequest('/users/' + encodeURIComponent(username), {
+      method: 'PATCH',
+      auth: true,
+      body: formData,
+    });
+  }
+
   return apiRequest('/users/' + encodeURIComponent(username), {
     method: 'PATCH',
     auth: true,
-    body: { nickname },
+    body: { nickname, bio },
+  });
+}
+
+
+export function getRecommendedUsers({ limit } = {}) {
+  return apiRequest('/users/recommendations', {
+    auth: true,
+    query: { limit },
+  });
+}
+
+export function searchUsers({ keyword, limit } = {}) {
+  return apiRequest('/users/search', {
+    auth: true,
+    query: { keyword, limit },
   });
 }

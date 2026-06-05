@@ -1,4 +1,5 @@
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const path = require('path');
 const oracledb = require('oracledb');
@@ -11,10 +12,15 @@ const userCategoriesRouter = require("./routes/userCategories");
 const usersRouter = require("./routes/users");
 const postsRouter = require("./routes/posts");
 const searchRouter = require("./routes/search");
+const noticesRouter = require("./routes/notices");
+const dmsRouter = require("./routes/dms");
+const adminRouter = require("./routes/admin");
 
 const db = require("./db");
+const { initSocket } = require('./socket');
 
 const app = express();
+const server = http.createServer(app);
 app.use(cors());
 app.use(express.json({ limit: '1mb' }));
 
@@ -30,13 +36,18 @@ app.use("/users/me/categories", userCategoriesRouter);
 app.use("/users", usersRouter);
 app.use("/posts", postsRouter);
 app.use("/search", searchRouter);
+app.use("/notices", noticesRouter);
+app.use("/dms", dmsRouter);
+app.use("/admin", adminRouter);
 
 async function startServer() {
   try {
     await db.init();
     console.log('Successfully connected to Oracle database');
 
-    app.listen(3010, () => {
+    initSocket(server);
+
+    server.listen(3010, () => {
       console.log('Server is running on port 3010');
     });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
   Alert,
   Avatar,
@@ -12,15 +12,24 @@ import {
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
 import { getUserConnections } from '../../api/userApi';
 
+const copy = {
+  followers: '팔로워',
+  following: '팔로잉',
+  emptyFollowers: '아직 팔로워가 없습니다.',
+  emptyFollowing: '아직 팔로잉한 사용자가 없습니다.',
+  loadError: '사용자 목록을 불러오지 못했습니다.',
+};
+
 function getInitial(user) {
   return String(user?.nickname || user?.username || 'L').charAt(0).toUpperCase();
 }
 
 function UserConnections() {
-  const { username, listType } = useParams();
+  const { username } = useParams();
+  const location = useLocation();
   const navigate = useNavigate();
-  const isFollowers = listType === 'followers';
-  const title = isFollowers ? '팔로워' : '팔로잉';
+  const isFollowers = location.pathname.endsWith('/followers');
+  const title = isFollowers ? copy.followers : copy.following;
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -38,7 +47,7 @@ function UserConnections() {
         setUsers(Array.isArray(data.users) ? data.users : []);
       })
       .catch((requestError) => {
-        if (!ignore) setError(requestError.message || '사용자 목록을 불러오지 못했습니다.');
+        if (!ignore) setError(requestError.message || copy.loadError);
       })
       .finally(() => {
         if (!ignore) setLoading(false);
@@ -49,8 +58,8 @@ function UserConnections() {
     };
   }, [isFollowers, username]);
 
-  const handleOpenProfile = (user) => {
-    navigate('/' + encodeURIComponent(user.username));
+  const handleOpenProfile = (targetUser) => {
+    navigate('/' + encodeURIComponent(targetUser.username));
   };
 
   return (
@@ -68,24 +77,24 @@ function UserConnections() {
       {loading ? (
         <Box className="main-feed-state"><CircularProgress size={28} /></Box>
       ) : users.length === 0 ? (
-        <Box className="main-feed-state"><Typography>{isFollowers ? '아직 팔로워가 없습니다.' : '아직 팔로잉한 사용자가 없습니다.'}</Typography></Box>
+        <Box className="main-feed-state"><Typography>{isFollowers ? copy.emptyFollowers : copy.emptyFollowing}</Typography></Box>
       ) : (
         <Stack className="connection-list">
-          {users.map((user) => (
+          {users.map((targetUser) => (
             <Box
               className="connection-card main-post--clickable"
-              key={user.userId}
-              onClick={() => handleOpenProfile(user)}
-              onKeyDown={(event) => { if (event.key === 'Enter') handleOpenProfile(user); }}
+              key={targetUser.userId}
+              onClick={() => handleOpenProfile(targetUser)}
+              onKeyDown={(event) => { if (event.key === 'Enter') handleOpenProfile(targetUser); }}
               role="button"
               tabIndex={0}
             >
-              <Avatar className="main-avatar">{getInitial(user)}</Avatar>
+              <Avatar className="main-avatar">{getInitial(targetUser)}</Avatar>
               <Box className="connection-card__body">
-                <Typography className="connection-card__name">{user.nickname}</Typography>
-                <Typography className="connection-card__username">@{user.username}</Typography>
+                <Typography className="connection-card__name">{targetUser.nickname}</Typography>
+                <Typography className="connection-card__username">@{targetUser.username}</Typography>
               </Box>
-              {user.followedByMe && <Typography className="connection-card__badge">팔로잉</Typography>}
+              {targetUser.followedByMe && <Typography className="connection-card__badge">{copy.following}</Typography>}
             </Box>
           ))}
         </Stack>

@@ -17,6 +17,10 @@ function getPostDetailPath(post) {
   return '/' + encodeURIComponent(String(post?.user?.username || 'user')) + '/status/' + post?.postId;
 }
 
+function getTimelineKey(post) {
+  return post?.timelineId || 'post-' + post?.postId;
+}
+
 function Bookmark() {
   const navigate = useNavigate();
   const [posts, setPosts] = useState([]);
@@ -108,7 +112,7 @@ function Bookmark() {
         <>
           <Stack className="main-post-list">
             {posts.map((post) => (
-              <PostFeedItem key={post.postId} post={post} onOpen={handleOpenPostDetail} showActions={false} showMenu={false} />
+              <PostFeedItem key={getTimelineKey(post)} post={post} onOpen={handleOpenPostDetail} showActions={false} showMenu={false} />
             ))}
           </Stack>
           <Box className="bookmark-pagination">

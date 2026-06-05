@@ -26,47 +26,51 @@ import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
 import WhatshotRoundedIcon from '@mui/icons-material/WhatshotRounded';
 import PostComposerDialog from './post/PostComposerDialog';
+import { getUnreadNoticeCount } from '../api/noticeApi';
+import { getUnreadDmCount } from '../api/dmApi';
+import { connectSocket, disconnectSocket } from '../socket/socketClient';
 import '../css/main.css';
 
 const THEME_MODE_KEY = 'liveLogThemeMode';
 
 const copy = {
-  home: "홈",
-  explore: "탐색하기",
-  alerts: "알림",
-  follow: "팔로우하기",
-  chat: "채팅",
-  bookmark: "북마크",
-  profile: "프로필",
-  post: "게시하기",
-  settings: "설정",
-  darkMode: "다크모드",
-  lightMode: "라이트모드",
-  accountLogout: "계정에서 로그아웃",
-  searchPlaceholder: "작품, 태그, 사용자를 검색",
-  trendKeywords: "트렌드 키워드",
-  mention: "언급",
-  times: "회",
-  todayCheck: "오늘의 체크",
-  check1: "이메일 인증 완료 계정만 메인 진입",
-  check2: "작성 API 연결 전 프론트 화면 검증",
+  home: '홈',
+  explore: '탐색하기',
+  alerts: '알림',
+  follow: '팔로우하기',
+  chat: '채팅',
+  bookmark: '북마크',
+  profile: '프로필',
+  admin: '관리자',
+  post: '게시하기',
+  settings: '설정',
+  darkMode: '다크 모드',
+  lightMode: '라이트 모드',
+  accountLogout: '계정 로그아웃',
+  searchPlaceholder: '작품, 태그, 사용자 검색',
+  trendKeywords: '인기 키워드',
+  mention: '언급',
+  times: '회',
+  todayCheck: '오늘의 확인',
+  check1: '새로운 로그 감지 알림 기능 점검',
+  check2: '실시간 알림 소켓 서버 연결 상태',
 };
 
 const navItems = [
   { label: copy.home, path: '/home', icon: <HomeRoundedIcon /> },
   { label: copy.explore, path: '/explore', icon: <SearchRoundedIcon /> },
-  { label: copy.alerts, path: '/alerts', icon: <NotificationsNoneRoundedIcon />, badge: 2 },
+  { label: copy.alerts, path: '/alerts', icon: <NotificationsNoneRoundedIcon />, badgeKey: 'alerts' },
   { label: copy.follow, path: '/follow', icon: <PersonAddAltRoundedIcon /> },
-  { label: copy.chat, path: '/chat', icon: <ChatBubbleOutlineRoundedIcon /> },
+  { label: copy.chat, path: '/chat', icon: <ChatBubbleOutlineRoundedIcon />, badgeKey: 'chat' },
   { label: copy.bookmark, path: '/bookmark', icon: <BookmarkBorderRoundedIcon /> },
   { label: copy.profile, path: '__PROFILE_PATH__', icon: <PersonRoundedIcon /> },
 ];
 
 const trendItems = [
-  { keyword: "프리렌", count: '1,248' },
-  { keyword: "스포일러방지", count: '932' },
-  { keyword: "주술회전", count: '781' },
-  { keyword: "새벽감상", count: '420' },
+  { keyword: '애니메이션', count: '1,248' },
+  { keyword: '넷플릭스', count: '932' },
+  { keyword: '신작출시', count: '781' },
+  { keyword: '정주행중', count: '420' },
 ];
 
 function getStoredThemeMode() {
@@ -100,19 +104,106 @@ function Main() {
   const [profileMenuOpen, setProfileMenuOpen] = useState(false);
   const [themeMode, setThemeMode] = useState(() => getStoredThemeMode());
   const [postDialogOpen, setPostDialogOpen] = useState(false);
+  const [unreadNoticeCount, setUnreadNoticeCount] = useState(0);
+  const [unreadDmCount, setUnreadDmCount] = useState(0);
 
-  const displayName = user?.nickname || user?.username || "게스트";
+  const displayName = user?.nickname || user?.username || '사용자';
   const accountId = user?.username || 'guest';
   const avatarSrc = user?.profileImage || user?.picture || '';
   const isDarkMode = themeMode === 'dark';
+  const isChatPage = location.pathname.startsWith('/chat');
   const profilePath = '/' + accountId;
-  const resolvedNavItems = navItems.map((item) => (item.path === '__PROFILE_PATH__' ? { ...item, path: profilePath } : item));
+  const adminNavItems = user?.role === 'ADMIN' ? [{ label: copy.admin, path: '/admin', icon: <SettingsRoundedIcon /> }] : [];
+  const resolvedNavItems = [...navItems, ...adminNavItems].map((item) => (item.path === '__PROFILE_PATH__' ? { ...item, path: profilePath } : item));
 
   useEffect(() => {
     if (!hasSelectedCategories(user) && location.pathname !== '/onboarding') {
       navigate('/onboarding', { replace: true });
     }
   }, [location.pathname, navigate, user]);
+
+  useEffect(() => {
+    let ignore = false;
+
+    getUnreadNoticeCount()
+      .then((data) => {
+        if (!ignore) setUnreadNoticeCount(Number(data.unreadCount) || 0);
+      })
+      .catch(() => {
+        if (!ignore) setUnreadNoticeCount(0);
+      });
+
+    getUnreadDmCount()
+      .then((data) => {
+        if (!ignore) setUnreadDmCount(Number(data.unreadCount) || 0);
+      })
+      .catch(() => {
+        if (!ignore) setUnreadDmCount(0);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [location.pathname]);
+
+  useEffect(() => {
+    const socket = connectSocket();
+    if (!socket) return undefined;
+
+    const handleNoticeCreated = (payload) => {
+      const nextUnreadCount = Number(payload?.unreadCount);
+      setUnreadNoticeCount((prevCount) => (
+        Number.isFinite(nextUnreadCount) ? nextUnreadCount : prevCount + 1
+      ));
+      window.dispatchEvent(new CustomEvent('liveLogNoticeCreated', { detail: payload }));
+    };
+
+    const handleDmCreated = (payload) => {
+      const nextUnreadCount = Number(payload?.unreadCount);
+      setUnreadDmCount((prevCount) => (
+        Number.isFinite(nextUnreadCount) ? nextUnreadCount : prevCount + 1
+      ));
+    };
+
+    const handleDmUnreadCount = (payload) => {
+      const nextUnreadCount = Number(payload?.unreadCount);
+      if (Number.isFinite(nextUnreadCount)) setUnreadDmCount(nextUnreadCount);
+    };
+
+    socket.on('notice:new', handleNoticeCreated);
+    socket.on('dm:new', handleDmCreated);
+    socket.on('dm:unread-count', handleDmUnreadCount);
+
+    return () => {
+      socket.off('notice:new', handleNoticeCreated);
+      socket.off('dm:new', handleDmCreated);
+      socket.off('dm:unread-count', handleDmUnreadCount);
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleUnreadChanged = (event) => {
+      const nextUnreadCount = Number(event.detail?.unreadCount);
+      if (Number.isFinite(nextUnreadCount)) {
+        setUnreadNoticeCount(nextUnreadCount);
+      }
+    };
+
+    const handleDmUnreadChanged = (event) => {
+      const nextUnreadCount = Number(event.detail?.unreadCount);
+      if (Number.isFinite(nextUnreadCount)) {
+        setUnreadDmCount(nextUnreadCount);
+      }
+    };
+
+    window.addEventListener('liveLogNoticeUnreadChanged', handleUnreadChanged);
+    window.addEventListener('liveLogDmUnreadChanged', handleDmUnreadChanged);
+
+    return () => {
+      window.removeEventListener('liveLogNoticeUnreadChanged', handleUnreadChanged);
+      window.removeEventListener('liveLogDmUnreadChanged', handleDmUnreadChanged);
+    };
+  }, []);
 
   const handleThemeToggle = () => {
     setThemeMode((prev) => {
@@ -128,13 +219,14 @@ function Main() {
   };
 
   const handleLogout = () => {
+    disconnectSocket();
     localStorage.removeItem('token');
     localStorage.removeItem('user');
     navigate('/');
   };
 
   return (
-    <Box className={isDarkMode ? 'main-shell main-shell--dark' : 'main-shell'}>
+    <Box className={(isDarkMode ? 'main-shell main-shell--dark' : 'main-shell') + (isChatPage ? ' main-shell--chat' : '')}>
       <Box component="aside" className="main-sidebar">
         <Box className="main-brand">
           <Box className="main-brand__mark">L</Box>
@@ -151,8 +243,12 @@ function Main() {
                 key={item.path}
                 onClick={() => navigate(item.path)}
                 startIcon={
-                  item.badge ? (
-                    <Badge badgeContent={item.badge} color="primary">
+                  (item.badgeKey === 'alerts' && unreadNoticeCount > 0) ? (
+                    <Badge badgeContent={unreadNoticeCount} color="primary">
+                      {item.icon}
+                    </Badge>
+                  ) : (item.badgeKey === 'chat' && unreadDmCount > 0) ? (
+                    <Badge badgeContent={unreadDmCount} color="primary">
                       {item.icon}
                     </Badge>
                   ) : item.icon
@@ -251,4 +347,3 @@ function Main() {
 }
 
 export default Main;
-

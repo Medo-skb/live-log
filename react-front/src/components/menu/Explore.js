@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Avatar,
@@ -23,14 +23,19 @@ function getPostDetailPath(post) {
   return '/' + encodeURIComponent(String(post?.user?.username || 'user')) + '/status/' + post?.postId;
 }
 
+function getTimelineKey(post) {
+  return post?.timelineId || 'post-' + post?.postId;
+}
+
 function getInitial(user) {
   return String(user?.nickname || user?.username || 'L').charAt(0).toUpperCase();
 }
 
 function Explore() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isDarkMode, user } = useOutletContext();
-  const [keyword, setKeyword] = useState('');
+  const [keyword, setKeyword] = useState(searchParams.get('q') || '');
   const [searchedKeyword, setSearchedKeyword] = useState('');
   const [posts, setPosts] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
@@ -41,6 +46,44 @@ function Explore() {
   const [suggestionsOpen, setSuggestionsOpen] = useState(false);
   const [suggestionsLoading, setSuggestionsLoading] = useState(false);
   const [error, setError] = useState('');
+
+  const requestSearch = async (search, options = {}) => {
+    const normalizedSearch = String(search || '').trim();
+    if (!normalizedSearch) return;
+
+    setLoading(true);
+    setError('');
+    setPosts([]);
+    setNextCursor(null);
+    setHasMore(false);
+    setSearchedKeyword(normalizedSearch);
+    setSuggestionsOpen(false);
+    setKeyword(normalizedSearch);
+
+    if (!options.skipUrlUpdate) {
+      setSearchParams({ q: normalizedSearch });
+    }
+
+    try {
+      const data = await getPosts({ search: normalizedSearch, limit: PAGE_SIZE });
+      setPosts(Array.isArray(data.posts) ? data.posts : []);
+      setNextCursor(data.nextCursor || null);
+      setHasMore(Boolean(data.hasMore));
+    } catch (requestError) {
+      setError(requestError.message || '검색 결과를 불러오지 못했습니다.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    const queryKeyword = searchParams.get('q') || '';
+    if (!queryKeyword.trim()) return;
+    if (queryKeyword === searchedKeyword) return;
+    requestSearch(queryKeyword, { skipUrlUpdate: true });
+  // searchedKeyword?? ???? ??? ?? ?? ?? ?? ??? ? ????.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     const search = keyword.trim();
@@ -74,27 +117,6 @@ function Explore() {
     };
   }, [keyword]);
 
-  const requestSearch = async (search) => {
-    setLoading(true);
-    setError('');
-    setPosts([]);
-    setNextCursor(null);
-    setHasMore(false);
-    setSearchedKeyword(search);
-    setSuggestionsOpen(false);
-
-    try {
-      const data = await getPosts({ search, limit: PAGE_SIZE });
-      setPosts(Array.isArray(data.posts) ? data.posts : []);
-      setNextCursor(data.nextCursor || null);
-      setHasMore(Boolean(data.hasMore));
-    } catch (requestError) {
-      setError(requestError.message || '검색 결과를 불러오지 못했습니다.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const handleSearch = async (event) => {
     event?.preventDefault();
     const search = keyword.trim();
@@ -103,13 +125,12 @@ function Explore() {
   };
 
   const handleSelectSearch = (value) => {
-    setKeyword(value);
     requestSearch(value);
   };
 
-  const handleOpenUser = (user) => {
+  const handleOpenUser = (targetUser) => {
     setSuggestionsOpen(false);
-    navigate('/' + encodeURIComponent(user.username));
+    navigate('/' + encodeURIComponent(targetUser.username));
   };
 
   const handleLoadMore = async () => {
@@ -121,9 +142,9 @@ function Explore() {
     try {
       const data = await getPosts({ search: searchedKeyword, cursor: nextCursor, limit: PAGE_SIZE });
       const nextPosts = Array.isArray(data.posts) ? data.posts : [];
-      const existingIds = new Set(posts.map((post) => post.postId));
+      const existingIds = new Set(posts.map(getTimelineKey));
 
-      setPosts((prevPosts) => [...prevPosts, ...nextPosts.filter((post) => !existingIds.has(post.postId))]);
+      setPosts((prevPosts) => [...prevPosts, ...nextPosts.filter((post) => !existingIds.has(getTimelineKey(post)))]);
       setNextCursor(data.nextCursor || null);
       setHasMore(Boolean(data.hasMore));
     } catch (requestError) {
@@ -155,7 +176,7 @@ function Explore() {
               fullWidth
               onChange={(event) => setKeyword(event.target.value)}
               onFocus={() => { if (keyword.trim()) setSuggestionsOpen(true); }}
-              placeholder="작품, 태그, 사용자, 내용을 검색"
+              placeholder="작품, 태그, 사용자, 게시글 검색"
               slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon /></InputAdornment> } }}
               value={keyword}
             />
@@ -187,12 +208,12 @@ function Explore() {
                 <Box className="explore-suggest-section-title">사용자</Box>
               )}
 
-              {!suggestionsLoading && !isTagMode && suggestions.users.map((user) => (
-                <Button className="explore-suggest-user" key={user.userId} onMouseDown={(event) => event.preventDefault()} onClick={() => handleOpenUser(user)}>
-                  <Avatar className="main-avatar explore-suggest-user__avatar">{getInitial(user)}</Avatar>
+              {!suggestionsLoading && !isTagMode && suggestions.users.map((targetUser) => (
+                <Button className="explore-suggest-user" key={targetUser.userId} onMouseDown={(event) => event.preventDefault()} onClick={() => handleOpenUser(targetUser)}>
+                  <Avatar className="main-avatar explore-suggest-user__avatar">{getInitial(targetUser)}</Avatar>
                   <Box className="explore-suggest-user__text">
-                    <Typography className="explore-suggest-user__name">{user.nickname}</Typography>
-                    <Typography className="explore-suggest-user__username">@{user.username}</Typography>
+                    <Typography className="explore-suggest-user__name">{targetUser.nickname}</Typography>
+                    <Typography className="explore-suggest-user__username">@{targetUser.username}</Typography>
                   </Box>
                 </Button>
               ))}
@@ -206,7 +227,7 @@ function Explore() {
       {loading ? (
         <Box className="main-feed-state"><CircularProgress size={28} /></Box>
       ) : !searchedKeyword ? (
-        <Box className="main-feed-state"><Typography>작품명, 해시태그, 사용자명으로 검색해보세요.</Typography></Box>
+        <Box className="main-feed-state"><Typography>작품명, 태그, 사용자 아이디로 검색해보세요.</Typography></Box>
       ) : posts.length === 0 ? (
         <Box className="main-feed-state"><Typography>검색 결과가 없습니다.</Typography></Box>
       ) : (
@@ -215,7 +236,7 @@ function Explore() {
             <Typography>검색어: <strong>{searchedKeyword}</strong></Typography>
           </Box>
           <Stack className="main-post-list">
-            {posts.map((post) => <PostFeedItem key={post.postId} isDarkMode={isDarkMode} onDeleted={handleDeletedPost} post={post} onOpen={handleOpenPost} viewer={user} />)}
+            {posts.map((post) => <PostFeedItem key={getTimelineKey(post)} isDarkMode={isDarkMode} onDeleted={handleDeletedPost} post={post} onOpen={handleOpenPost} viewer={user} />)}
 
             {hasMore && (
               <Box className="post-detail-more-row">
