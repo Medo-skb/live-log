@@ -19,7 +19,7 @@ function normalizeLimit(value) {
 
 function normalizeStatus(value) {
   const status = String(value || '').trim().toUpperCase();
-  return ['PENDING', 'PROCESSED'].includes(status) ? status : '';
+  return ['PENDING', 'APPROVED', 'REJECTED'].includes(status) ? status : '';
 }
 
 function requireAdmin(req, res, next) {
@@ -138,12 +138,20 @@ router.get('/reports', async (req, res) => {
 
 router.patch('/reports/:reportId', async (req, res) => {
   const reportId = normalizePositiveInteger(req.params.reportId);
-  const status = normalizeStatus(req.body.status) || 'PROCESSED';
+  const status = normalizeStatus(req.body.status);
   const hidePost = req.body.hidePost === true || req.body.hidePost === 1 || req.body.hidePost === '1';
   let connection;
 
   if (!reportId) {
     return res.status(400).json({ result: 'fail', message: '신고 ID가 올바르지 않습니다.' });
+  }
+
+  if (!status || status === 'PENDING') {
+    return res.status(400).json({ result: 'fail', message: '신고 처리 상태가 올바르지 않습니다.' });
+  }
+
+  if (hidePost && status !== 'APPROVED') {
+    return res.status(400).json({ result: 'fail', message: '게시글 숨김 처리는 신고 승인 상태에서만 가능합니다.' });
   }
 
   try {
@@ -160,8 +168,14 @@ router.patch('/reports/:reportId', async (req, res) => {
     }
 
     await connection.execute(
-      'UPDATE REPORT SET STATUS = :status WHERE REPORT_ID = :reportId',
-      { status, reportId }
+      `
+        UPDATE REPORT
+        SET STATUS = :status,
+            PROCESSED_AT = CURRENT_TIMESTAMP,
+            ADMIN_ID = :adminId
+        WHERE REPORT_ID = :reportId
+      `,
+      { status, adminId: req.user.userId, reportId }
     );
 
     if (hidePost) {

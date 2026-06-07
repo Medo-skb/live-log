@@ -150,10 +150,35 @@ function QuotePostCard({ onOpen, post }) {
         {post.progress && <Chip className="main-work-chip" label={post.progress} size="small" />}
       </Stack>
       {String(post.content || '').trim() && <Typography className="main-quote-preview-card__content">{post.content}</Typography>}
+      {post.media?.length > 0 && (
+        <Box className="main-quote-preview-card__media">
+          {post.media.map((media) => (
+            media.mediaType === 'VIDEO'
+              ? <video controls key={media.mediaId} src={resolveMediaUrl(media.fileUrl)} />
+              : <img alt="quoted post media" key={media.mediaId} src={resolveMediaUrl(media.fileUrl)} />
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }
 
+
+function normalizeTagValue(tag) {
+  return String(tag || '').replace(/^#/, '').trim().toLowerCase();
+}
+
+function getVisibleTags(post) {
+  const content = String(post?.content || '').toLowerCase();
+  const seen = new Set();
+
+  return (post?.tags || []).filter((tag) => {
+    const normalizedTag = normalizeTagValue(tag);
+    if (!normalizedTag || seen.has(normalizedTag)) return false;
+    seen.add(normalizedTag);
+    return !content.includes('#' + normalizedTag);
+  });
+}
 function PostFeedItem({ isDarkMode = false, onDeleted, onOpen, post, showActions = true, showMenu = true, viewer }) {
   const navigate = useNavigate();
   const appModal = useAppModal();
@@ -179,6 +204,7 @@ function PostFeedItem({ isDarkMode = false, onDeleted, onOpen, post, showActions
   const menuOpen = Boolean(menuAnchorEl);
   const repostMenuOpen = Boolean(repostMenuAnchorEl);
   const repostLabel = getRepostLabel(displayPost, viewer);
+  const visibleTags = getVisibleTags(displayPost);
 
   const stopActionClick = (event) => event.stopPropagation();
   const handleOpen = () => onOpen?.(displayPost);
@@ -394,9 +420,9 @@ function PostFeedItem({ isDarkMode = false, onDeleted, onOpen, post, showActions
 
         {displayPost.quotePost && <QuotePostCard onOpen={handleOpenQuotePost} post={displayPost.quotePost} />}
 
-        {displayPost.tags?.length > 0 && (
+        {visibleTags.length > 0 && (
           <Stack className="main-tag-row" direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-            {displayPost.tags.map((tag) => (
+            {visibleTags.map((tag) => (
               <button
                 className="main-tag main-tag--button"
                 key={tag}

@@ -17,28 +17,25 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import ImageRoundedIcon from '@mui/icons-material/ImageRounded';
 import TagRoundedIcon from '@mui/icons-material/TagRounded';
-import VisibilityOffRoundedIcon from '@mui/icons-material/VisibilityOffRounded';
 import { createPost } from '../../api/postApi';
 import { MEDIA_ACCEPT, validateMediaFiles } from '../../utils/mediaValidation';
 import MediaPreviewList from './MediaPreviewList';
 import { DEFAULT_CATEGORIES } from '../../constants/categories';
 
-const SPOILER_STATUS = {
-  IDLE: 'IDLE',
-  ANALYZING: 'ANALYZING',
-  SAFE: 'SAFE',
-  SPOILER: 'SPOILER',
-};
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
+
+function resolveMediaUrl(fileUrl) {
+  if (!fileUrl) return '';
+  return fileUrl.startsWith('http') ? fileUrl : API_BASE_URL + fileUrl;
+}
 
 const copy = {
   title: '로그 작성',
   quoteTitle: '인용하기',
   category: '카테고리',
-  spoiler: '스포일러',
   workName: '작품명',
   progress: '진도',
   placeholder: '지금 보는 작품의 순간을 남겨보세요.',
@@ -47,10 +44,6 @@ const copy = {
   submitting: '게시 중',
   fileAttach: '파일 첨부',
   tagButton: '태그',
-  aiIdle: 'AI 분석',
-  aiAnalyzing: '분석 중',
-  aiSafe: '안전',
-  aiSpoiler: '스포일러 감지',
 };
 
 function parsePostCreatedAt(createdAt) {
@@ -84,7 +77,7 @@ function QuotePreviewCard({ post }) {
   return (
     <Box className="main-quote-preview-card">
       <Box className="main-quote-preview-card__author">
-        <Avatar className="main-avatar main-avatar--quote">{post.user.nickname.charAt(0)}</Avatar>
+        <Avatar className="main-avatar main-avatar--quote" src={resolveMediaUrl(post.user.profileImageUrl || post.user.profileImage)}>{post.user.nickname.charAt(0)}</Avatar>
         <Box className="main-quote-preview-card__author-text">
           <Typography className="main-quote-preview-card__name">{post.user.nickname}</Typography>
           <Typography className="main-post__meta">@{formatUsername(post.user.username)} · {formatRelativeTime(post.createdAt)}</Typography>
@@ -96,15 +89,17 @@ function QuotePreviewCard({ post }) {
         <Chip className="main-work-chip" label={post.progress} size="small" />
       </Stack>
       <Typography className="main-quote-preview-card__content">{post.content}</Typography>
+      {post.media?.length > 0 && (
+        <Box className="main-quote-preview-card__media">
+          {post.media.map((media) => (
+            media.mediaType === 'VIDEO'
+              ? <video controls key={media.mediaId} src={resolveMediaUrl(media.fileUrl)} />
+              : <img alt="quoted post media" key={media.mediaId} src={resolveMediaUrl(media.fileUrl)} />
+          ))}
+        </Box>
+      )}
     </Box>
   );
-}
-
-function getSpoilerStatusLabel(status) {
-  if (status === SPOILER_STATUS.ANALYZING) return copy.aiAnalyzing;
-  if (status === SPOILER_STATUS.SAFE) return copy.aiSafe;
-  if (status === SPOILER_STATUS.SPOILER) return copy.aiSpoiler;
-  return copy.aiIdle;
 }
 
 function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPostCreated, open, quotePost, user }) {
@@ -117,7 +112,6 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
   const [workTitle, setWorkTitle] = useState('');
   const [progress, setProgress] = useState('');
   const [content, setContent] = useState('');
-  const [spoilerStatus, setSpoilerStatus] = useState(SPOILER_STATUS.IDLE);
   const [submitLoading, setSubmitLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedMediaFiles, setSelectedMediaFiles] = useState([]);
@@ -127,7 +121,6 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
   const isSubmitDisabled = (isQuoteMode
     ? !content.trim() && selectedMediaFiles.length === 0
     : !categoryId || !workTitle.trim() || !progress.trim())
-    || spoilerStatus === SPOILER_STATUS.ANALYZING
     || submitLoading;
 
   const resetForm = () => {
@@ -135,7 +128,6 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
     setWorkTitle('');
     setProgress('');
     setContent('');
-    setSpoilerStatus(SPOILER_STATUS.IDLE);
     setError('');
     setSelectedMediaFiles([]);
     if (mediaInputRef.current) mediaInputRef.current.value = '';
@@ -148,18 +140,6 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
 
   const handleContentChange = (event) => {
     setContent(event.target.value);
-    setSpoilerStatus(SPOILER_STATUS.IDLE);
-  };
-
-  const handleAnalyzeSpoiler = () => {
-    if (!content.trim()) return;
-
-    setSpoilerStatus(SPOILER_STATUS.ANALYZING);
-
-    window.setTimeout(() => {
-      const spoilerPattern = /죽|사망|범인|결말|반전|스포/i;
-      setSpoilerStatus(spoilerPattern.test(content) ? SPOILER_STATUS.SPOILER : SPOILER_STATUS.SAFE);
-    }, 500);
   };
 
   const handleMediaButtonClick = () => {
@@ -196,7 +176,6 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
         workTitle: isQuoteMode ? quotePost.workTitle : workTitle.trim(),
         progress: isQuoteMode ? quotePost.progress : progress.trim(),
         content: content.trim(),
-        isSpoiler: spoilerStatus === SPOILER_STATUS.SPOILER,
         mediaFiles: selectedMediaFiles,
         quotePostId: quotePost?.postId,
       });
@@ -279,17 +258,8 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
                 <Button className="main-tool-text-button" startIcon={<TagRoundedIcon />}>
                   {copy.tagButton}
                 </Button>
-                <Button
-                  className={spoilerStatus === SPOILER_STATUS.SPOILER ? 'main-ai-button main-ai-button--danger' : 'main-ai-button'}
-                  disabled={!content.trim() || spoilerStatus === SPOILER_STATUS.ANALYZING}
-                  onClick={handleAnalyzeSpoiler}
-                  startIcon={<AutoAwesomeRoundedIcon />}
-                >
-                  {getSpoilerStatusLabel(spoilerStatus)}
-                </Button>
               </Stack>
               <Stack alignItems="center" className="main-composer__post-actions" direction="row" spacing={1.4}>
-                {spoilerStatus === SPOILER_STATUS.SPOILER && <Chip className="main-spoiler-chip" icon={<VisibilityOffRoundedIcon />} label={copy.spoiler} size="small" />}
                 <Button className="main-submit-button main-submit-button--post" disabled={isSubmitDisabled} onClick={handleSubmit} size="large" variant="contained">
                   {submitLoading ? copy.submitting : copy.submit}
                 </Button>

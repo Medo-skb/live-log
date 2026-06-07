@@ -25,6 +25,8 @@ import PersonRoundedIcon from '@mui/icons-material/PersonRounded';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
 import WhatshotRoundedIcon from '@mui/icons-material/WhatshotRounded';
+import { getTrendingTags } from '../api/searchApi';
+import { getRecommendedUsers } from '../api/userApi';
 import PostComposerDialog from './post/PostComposerDialog';
 import { getUnreadNoticeCount } from '../api/noticeApi';
 import { getUnreadDmCount } from '../api/dmApi';
@@ -51,9 +53,9 @@ const copy = {
   trendKeywords: '인기 키워드',
   mention: '언급',
   times: '회',
-  todayCheck: '오늘의 확인',
-  check1: '새로운 로그 감지 알림 기능 점검',
-  check2: '실시간 알림 소켓 서버 연결 상태',
+  recommendedFollowers: '추천 팔로워',
+  noTrendTags: '아직 언급된 태그가 없습니다.',
+  noRecommendedUsers: '추천할 사용자가 없습니다.',
 };
 
 const navItems = [
@@ -66,12 +68,6 @@ const navItems = [
   { label: copy.profile, path: '__PROFILE_PATH__', icon: <PersonRoundedIcon /> },
 ];
 
-const trendItems = [
-  { keyword: '애니메이션', count: '1,248' },
-  { keyword: '넷플릭스', count: '932' },
-  { keyword: '신작출시', count: '781' },
-  { keyword: '정주행중', count: '420' },
-];
 
 function getStoredThemeMode() {
   return localStorage.getItem(THEME_MODE_KEY) === 'dark' ? 'dark' : 'light';
@@ -106,6 +102,9 @@ function Main() {
   const [postDialogOpen, setPostDialogOpen] = useState(false);
   const [unreadNoticeCount, setUnreadNoticeCount] = useState(0);
   const [unreadDmCount, setUnreadDmCount] = useState(0);
+  const [trendTags, setTrendTags] = useState([]);
+  const [recommendedUsers, setRecommendedUsers] = useState([]);
+  const [asideSearchKeyword, setAsideSearchKeyword] = useState('');
 
   const displayName = user?.nickname || user?.username || '사용자';
   const accountId = user?.username || 'guest';
@@ -122,6 +121,30 @@ function Main() {
     }
   }, [location.pathname, navigate, user]);
 
+
+  useEffect(() => {
+    let ignore = false;
+
+    getTrendingTags()
+      .then((data) => {
+        if (!ignore) setTrendTags(Array.isArray(data.tags) ? data.tags : []);
+      })
+      .catch(() => {
+        if (!ignore) setTrendTags([]);
+      });
+
+    getRecommendedUsers({ limit: 3 })
+      .then((data) => {
+        if (!ignore) setRecommendedUsers(Array.isArray(data.users) ? data.users : []);
+      })
+      .catch(() => {
+        if (!ignore) setRecommendedUsers([]);
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [location.pathname]);
   useEffect(() => {
     let ignore = false;
 
@@ -224,6 +247,12 @@ function Main() {
     localStorage.removeItem('user');
     navigate('/');
   };
+  const handleAsideSearch = (event) => {
+    event?.preventDefault();
+    const search = asideSearchKeyword.trim();
+    if (!search) return;
+    navigate('/explore?q=' + encodeURIComponent(search));
+  };
 
   return (
     <Box className={(isDarkMode ? 'main-shell main-shell--dark' : 'main-shell') + (isChatPage ? ' main-shell--chat' : '')}>
@@ -309,37 +338,58 @@ function Main() {
       />
 
       <Box component="aside" className="main-aside">
-        <TextField
-          className="main-search"
-          fullWidth
-          placeholder={copy.searchPlaceholder}
-          slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon /></InputAdornment> } }}
-        />
+        <Box component="form" onSubmit={handleAsideSearch}>
+          <TextField
+            className="main-search"
+            fullWidth
+            onChange={(event) => setAsideSearchKeyword(event.target.value)}
+            placeholder={copy.searchPlaceholder}
+            slotProps={{ input: { startAdornment: <InputAdornment position="start"><SearchRoundedIcon /></InputAdornment> } }}
+            value={asideSearchKeyword}
+          />
+        </Box>
 
         <Box className="main-side-panel">
           <Box className="main-side-panel__title-row">
             <Typography className="main-side-panel__title">{copy.trendKeywords}</Typography>
             <WhatshotRoundedIcon className="main-side-panel__icon" />
           </Box>
-          <Stack divider={<Divider />}>
-            {trendItems.map((item, index) => (
-              <Box className="main-trend-item" key={item.keyword}>
-                <Typography className="main-trend-item__rank">{index + 1}</Typography>
-                <Box>
-                  <Typography className="main-trend-item__keyword">#{item.keyword}</Typography>
-                  <Typography className="main-trend-item__count">{copy.mention} {item.count}{copy.times}</Typography>
-                </Box>
-              </Box>
-            ))}
-          </Stack>
+          {trendTags.length === 0 ? (
+            <Typography className="main-side-panel__empty">{copy.noTrendTags}</Typography>
+          ) : (
+            <Stack divider={<Divider />}>
+              {trendTags.map((item, index) => (
+                <Button className="main-trend-item main-trend-item--button" fullWidth key={item.tag} onClick={() => navigate('/explore?q=' + encodeURIComponent('#' + item.tag))}>
+                  <Typography className="main-trend-item__rank">{index + 1}</Typography>
+                  <Box>
+                    <Typography className="main-trend-item__keyword">#{item.tag}</Typography>
+                    <Typography className="main-trend-item__count">{copy.mention} {Number(item.count || 0).toLocaleString()}{copy.times}</Typography>
+                  </Box>
+                </Button>
+              ))}
+            </Stack>
+          )}
         </Box>
 
-        <Box className="main-side-panel main-side-panel--notice">
-          <Typography className="main-side-panel__title">{copy.todayCheck}</Typography>
-          <Stack spacing={1.2}>
-            <Box className="main-check-row"><Badge color="primary" variant="dot" /><Typography>{copy.check1}</Typography></Box>
-            <Box className="main-check-row"><Badge color="secondary" variant="dot" /><Typography>{copy.check2}</Typography></Box>
-          </Stack>
+        <Box className="main-side-panel">
+          <Box className="main-side-panel__title-row">
+            <Typography className="main-side-panel__title">{copy.recommendedFollowers}</Typography>
+          </Box>
+          {recommendedUsers.length === 0 ? (
+            <Typography className="main-side-panel__empty">{copy.noRecommendedUsers}</Typography>
+          ) : (
+            <Stack divider={<Divider />}>
+              {recommendedUsers.map((targetUser) => (
+                <Button className="main-recommend-user" fullWidth key={targetUser.userId} onClick={() => navigate('/' + encodeURIComponent(targetUser.username))}>
+                  <Avatar className="main-avatar main-recommend-user__avatar">{String(targetUser.nickname || targetUser.username || 'L').charAt(0).toUpperCase()}</Avatar>
+                  <Box className="main-recommend-user__text">
+                    <Typography className="main-recommend-user__name">{targetUser.nickname || targetUser.username}</Typography>
+                    <Typography className="main-recommend-user__username">@{targetUser.username}</Typography>
+                  </Box>
+                </Button>
+              ))}
+            </Stack>
+          )}
         </Box>
       </Box>
     </Box>

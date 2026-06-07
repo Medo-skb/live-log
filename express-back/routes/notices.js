@@ -98,7 +98,7 @@ router.get('/', jwtAuthentication, async (req, res) => {
     });
   } catch (error) {
     console.error('Notice list error', error);
-    return res.status(500).json({ result: 'fail', message: '?? ??? ???? ? ??? ??????.' });
+    return res.status(500).json({ result: 'fail', message: '알림 목록을 불러오는 중 오류가 발생했습니다.' });
   } finally {
     if (connection) await connection.close();
   }
@@ -118,7 +118,7 @@ router.get('/unread-count', jwtAuthentication, async (req, res) => {
     return res.json({ result: 'success', unreadCount: result.rows[0]?.UNREAD_COUNT || 0 });
   } catch (error) {
     console.error('Notice unread count error', error);
-    return res.status(500).json({ result: 'fail', message: '?? ?? ?? ?? ???? ?????.' });
+    return res.status(500).json({ result: 'fail', message: '읽지 않은 알림 수를 불러오지 못했습니다.' });
   } finally {
     if (connection) await connection.close();
   }
@@ -139,7 +139,7 @@ router.patch('/read-all', jwtAuthentication, async (req, res) => {
   } catch (error) {
     if (connection) await connection.rollback();
     console.error('Notice read all error', error);
-    return res.status(500).json({ result: 'fail', message: '?? ?? ?? ? ??? ??????.' });
+    return res.status(500).json({ result: 'fail', message: '모든 알림을 읽음 처리하지 못했습니다.' });
   } finally {
     if (connection) await connection.close();
   }
@@ -150,7 +150,7 @@ router.patch('/:noticeId/read', jwtAuthentication, async (req, res) => {
   let connection;
 
   if (!noticeId) {
-    return res.status(400).json({ result: 'fail', message: '?? ??? ???? ????.' });
+    return res.status(400).json({ result: 'fail', message: '올바른 알림 번호가 아닙니다.' });
   }
 
   try {
@@ -165,7 +165,7 @@ router.patch('/:noticeId/read', jwtAuthentication, async (req, res) => {
   } catch (error) {
     if (connection) await connection.rollback();
     console.error('Notice read error', error);
-    return res.status(500).json({ result: 'fail', message: '?? ?? ?? ? ??? ??????.' });
+    return res.status(500).json({ result: 'fail', message: '알림을 읽음 처리하지 못했습니다.' });
   } finally {
     if (connection) await connection.close();
   }

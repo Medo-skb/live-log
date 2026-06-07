@@ -99,6 +99,7 @@ function mapRecommendedUserRow(row) {
     nickname: row.NICKNAME,
     tag: row.DISCRIMINATOR,
     followedByMe: row.FOLLOWED_BY_ME === 1,
+    role: row.ROLE || 'USER',
     counts: {
       posts: row.POST_COUNT || 0,
       followers: row.FOLLOWER_COUNT || 0,
@@ -217,6 +218,7 @@ router.get('/recommendations', jwtAuthentication, async (req, res) => {
             ) AS MUTUAL_CATEGORY_COUNT
           FROM USERS u
           WHERE u.USER_ID <> :viewerId
+            AND u.ROLE <> 'ADMIN'
             AND NOT EXISTS (
               SELECT 1 FROM FOLLOWS f
               WHERE f.FOLLOWER_ID = :viewerId AND f.FOLLOWING_ID = u.USER_ID
@@ -281,6 +283,7 @@ router.get('/search', jwtAuthentication, async (req, res) => {
             ) AS MUTUAL_CATEGORY_COUNT
           FROM USERS u
           WHERE u.USER_ID <> :viewerId
+            AND u.ROLE <> 'ADMIN'
             AND (
               LOWER(u.USERNAME) LIKE LOWER(:searchKeyword)
               OR LOWER(u.NICKNAME) LIKE LOWER(:searchKeyword)
@@ -432,6 +435,10 @@ router.post('/:username/follow', jwtAuthentication, async (req, res) => {
       return res.status(400).json({ result: 'fail', message: '본인은 팔로우할 수 없습니다.' });
     }
 
+    if (String(profile.role || '').toUpperCase() === 'ADMIN') {
+      return res.status(403).json({ result: 'fail', message: '관리자 계정은 팔로우할 수 없습니다.' });
+    }
+
     const found = await connection.execute(
       'SELECT FOLLOWER_ID FROM FOLLOWS WHERE FOLLOWER_ID = :viewerId AND FOLLOWING_ID = :targetUserId',
       { viewerId: req.user.userId, targetUserId: profile.userId },
@@ -511,7 +518,7 @@ router.get('/:username/:type', jwtAuthentication, async (req, res) => {
         'CASE WHEN EXISTS (SELECT 1 FROM FOLLOWS viewer_follow WHERE viewer_follow.FOLLOWER_ID = :viewerId AND viewer_follow.FOLLOWING_ID = u.USER_ID) THEN 1 ELSE 0 END AS FOLLOWED_BY_ME ' +
         'FROM FOLLOWS f ' +
         'JOIN USERS u ON ' + joinCondition + ' ' +
-        'WHERE ' + ownerCondition + ' ' +
+        'WHERE ' + ownerCondition + " AND u.ROLE <> 'ADMIN' " +
         'ORDER BY f.CREATED_AT DESC',
       { targetUserId: profile.userId, viewerId: req.user.userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }

@@ -32,6 +32,7 @@ import {
 } from '../../api/postApi';
 import PostComposerDialog from '../post/PostComposerDialog';
 import { useAppModal } from '../common/ModalProvider';
+import { getTagSearchPath, getVisibleTags } from '../../utils/tagDisplay';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
 const META_SEPARATOR = String.fromCharCode(183);
@@ -406,9 +407,9 @@ function PhotoViewer() {
 
             {String(post.content || '').trim() && <Typography className="photo-viewer__content">{post.content}</Typography>}
 
-            {post.tags?.length > 0 && (
+            {getVisibleTags(post).length > 0 && (
               <Stack className="photo-viewer__tags" direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                {post.tags.map((tag) => <span className="main-tag" key={tag}>#{tag}</span>)}
+                {getVisibleTags(post).map((tag) => <button className="main-tag main-tag--button" key={tag} onClick={() => navigate(getTagSearchPath(tag))} type="button">#{tag}</button>)}
               </Stack>
             )}
 

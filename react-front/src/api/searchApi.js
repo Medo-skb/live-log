@@ -6,3 +6,9 @@ export function getSearchSuggestions({ keyword }) {
     query: { keyword },
   });
 }
+
+export function getTrendingTags() {
+  return apiRequest('/search/tags/trending', {
+    auth: true,
+  });
+}

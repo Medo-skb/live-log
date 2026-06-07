@@ -11,12 +11,13 @@ import {
   Divider,
   IconButton,
   InputAdornment,
+  Menu,
+  MenuItem,
   Stack,
   TextField,
   Tooltip,
   Typography,
 } from '@mui/material';
-import BlockRoundedIcon from '@mui/icons-material/BlockRounded';
 import ChatBubbleOutlineRoundedIcon from '@mui/icons-material/ChatBubbleOutlineRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
@@ -25,7 +26,7 @@ import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 import MailOutlineRoundedIcon from '@mui/icons-material/MailOutlineRounded';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import SendRoundedIcon from '@mui/icons-material/SendRounded';
-import { blockDmUser, deleteDmMessage, getDmConversations, getDmMessages, markDmConversationRead, sendDmMessage } from '../../api/dmApi';
+import { deleteDmMessage, getDmConversations, getDmMessages, markDmConversationRead, sendDmMessage } from '../../api/dmApi';
 import { getRecommendedUsers, searchUsers } from '../../api/userApi';
 import { connectSocket } from '../../socket/socketClient';
 import { useAppModal } from '../common/ModalProvider';
@@ -36,10 +37,13 @@ const MAX_MESSAGE_LENGTH = 2000;
 const copy = {
   title: '채팅',
   filterAll: '전체',
+  filterUnread: '읽지 않음',
+  messageRequests: '쪽지 보관함',
+  requestEmptyTitle: '쪽지 요청이 없습니다',
+  requestEmptyBody: '팔로우 관계가 아닌 사용자에게 받은 쪽지가 여기에 표시됩니다.',
   searchPlaceholder: '검색',
-  newMessageTitle: '새 쪽지',
+  newMessageTitle: '새 채팅',
   newChatPlaceholder: '이름이나 사용자 아이디로 검색하기',
-  createGroup: '그룹 만들기',
   recommendedUsers: '추천 사용자',
   searchResults: '검색 결과',
   recommendedEmpty: '추천할 사용자가 없습니다.',
@@ -131,6 +135,9 @@ function Chat() {
   const [searchResults, setSearchResults] = useState([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [newChatOpen, setNewChatOpen] = useState(false);
+  const [conversationFilter, setConversationFilter] = useState('all');
+  const [requestsOpen, setRequestsOpen] = useState(false);
+  const [filterAnchorEl, setFilterAnchorEl] = useState(null);
   const [newChatKeyword, setNewChatKeyword] = useState('');
   const [newChatResults, setNewChatResults] = useState([]);
   const [recommendedUsers, setRecommendedUsers] = useState([]);
@@ -140,11 +147,28 @@ function Chat() {
 
   const selectedKey = useMemo(() => getConversationKey(selectedUser), [selectedUser]);
   const selectedUsername = selectedUser?.username || '';
+  const filteredConversations = conversations.filter((conversation) => {
+    if (requestsOpen && !conversation.isRequest) return false;
+    if (!requestsOpen && conversation.isRequest) return false;
+    if (conversationFilter === 'unread') return Number(conversation.unreadCount || 0) > 0;
+    return true;
+  });
   const activeConversationList = searchKeyword.trim()
-    ? searchResults.map((resultUser) => ({ user: resultUser, lastMessage: null, unreadCount: 0 }))
-    : conversations;
+    ? requestsOpen
+      ? filteredConversations.filter((conversation) => {
+        const keyword = searchKeyword.trim().toLowerCase();
+        return String(conversation.user?.nickname || '').toLowerCase().includes(keyword)
+          || String(conversation.user?.username || '').toLowerCase().includes(keyword);
+      })
+      : searchResults.filter((resultUser) => String(resultUser.role || 'USER').toUpperCase() !== 'ADMIN').map((resultUser) => ({ user: resultUser, lastMessage: null, unreadCount: 0 }))
+    : filteredConversations;
   const normalizedNewChatKeyword = newChatKeyword.trim();
-  const newChatUsers = normalizedNewChatKeyword ? newChatResults : recommendedUsers;
+  const newChatUsers = (normalizedNewChatKeyword ? newChatResults : recommendedUsers)
+    .filter((targetUser) => String(targetUser.role || 'USER').toUpperCase() !== 'ADMIN');
+  const conversationFilterLabel = conversationFilter === 'unread' ? copy.filterUnread : copy.filterAll;
+  const conversationTitle = requestsOpen ? copy.messageRequests : copy.title;
+  const emptyConversationTitle = requestsOpen ? copy.requestEmptyTitle : copy.emptyInboxTitle;
+  const emptyConversationBody = requestsOpen ? copy.requestEmptyBody : copy.emptyInboxBody;
 
   const syncUnreadCount = (nextConversations) => {
     window.dispatchEvent(new CustomEvent('liveLogDmUnreadChanged', {
@@ -376,6 +400,17 @@ function Chat() {
     setSearchResults([]);
   };
 
+  const handleSelectConversationFilter = (nextFilter) => {
+    setConversationFilter(nextFilter);
+    setFilterAnchorEl(null);
+  };
+
+  const handleOpenRequests = () => {
+    setRequestsOpen((current) => !current);
+    setSelectedUser(null);
+    setFilterAnchorEl(null);
+  };
+
   const handleOpenNewChat = () => {
     setNewChatKeyword('');
     setNewChatResults([]);
@@ -452,29 +487,6 @@ function Chat() {
     }
   };
 
-  const handleBlockUser = async () => {
-    if (!selectedUsername) return;
-
-    const confirmed = await appModal.showConfirm({
-      title: copy.blockConfirmTitle,
-      message: copy.blockConfirmBody,
-      confirmText: copy.blockButton,
-      cancelText: copy.cancel,
-      variant: 'danger',
-    });
-
-    if (!confirmed) return;
-
-    try {
-      await blockDmUser({ username: selectedUsername });
-      setConversations((prevConversations) => prevConversations.filter((conversation) => getConversationKey(conversation.user) !== selectedKey));
-      setSelectedUser(null);
-      setMessages([]);
-    } catch (requestError) {
-      setError(requestError.message || copy.sendError);
-    }
-  };
-
   const handleDraftKeyDown = (event) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
@@ -487,11 +499,16 @@ function Chat() {
       <Box className="dm-layout">
         <Box className="dm-list-panel">
           <Box className="dm-header">
-            <Typography className="dm-header__title">{copy.title}</Typography>
-            <Button className="dm-filter-button" endIcon={<ExpandMoreRoundedIcon />}>{copy.filterAll}</Button>
-            <Tooltip title={copy.emptyInboxBody}><IconButton className="dm-header-icon"><MailOutlineRoundedIcon /></IconButton></Tooltip>
+            <Typography className="dm-header__title">{conversationTitle}</Typography>
+            <Button className="dm-filter-button" endIcon={<ExpandMoreRoundedIcon />} onClick={(event) => setFilterAnchorEl(event.currentTarget)}>{conversationFilterLabel}</Button>
+            <Tooltip title={copy.messageRequests}><IconButton className={requestsOpen ? 'dm-header-icon dm-header-icon--active' : 'dm-header-icon'} onClick={handleOpenRequests}><MailOutlineRoundedIcon /></IconButton></Tooltip>
             <Tooltip title={copy.newChat}><IconButton className="dm-header-icon" onClick={handleOpenNewChat}><ChatBubbleOutlineRoundedIcon /></IconButton></Tooltip>
           </Box>
+
+          <Menu anchorEl={filterAnchorEl} onClose={() => setFilterAnchorEl(null)} open={Boolean(filterAnchorEl)}>
+            <MenuItem selected={conversationFilter === 'all'} onClick={() => handleSelectConversationFilter('all')}>{copy.filterAll}</MenuItem>
+            <MenuItem selected={conversationFilter === 'unread'} onClick={() => handleSelectConversationFilter('unread')}>{copy.filterUnread}</MenuItem>
+          </Menu>
 
           <Box className="dm-search-box">
             <TextField
@@ -520,8 +537,8 @@ function Chat() {
           ) : activeConversationList.length === 0 ? (
             <Box className="dm-inbox-empty">
               <InboxOutlinedIcon />
-              <Typography className="dm-inbox-empty__title">{searchKeyword.trim() ? copy.searchEmpty : copy.emptyInboxTitle}</Typography>
-              <Typography className="dm-inbox-empty__body">{copy.emptyInboxBody}</Typography>
+              <Typography className="dm-inbox-empty__title">{searchKeyword.trim() ? copy.searchEmpty : emptyConversationTitle}</Typography>
+              <Typography className="dm-inbox-empty__body">{searchKeyword.trim() ? copy.searchEmpty : emptyConversationBody}</Typography>
             </Box>
           ) : (
             <Stack className="dm-conversation-list" divider={<Divider />}>
@@ -558,9 +575,6 @@ function Chat() {
                   <Typography className="dm-message-header__name">{selectedUser.nickname}</Typography>
                   <Typography className="dm-message-header__username">@{selectedUser.username}</Typography>
                 </Box>
-                <Tooltip title={copy.blockUser}>
-                  <IconButton className="dm-header-icon" onClick={handleBlockUser}><BlockRoundedIcon /></IconButton>
-                </Tooltip>
               </Box>
 
               {error && <Alert className="main-form-alert" severity="error">{error}</Alert>}
@@ -574,13 +588,7 @@ function Chat() {
 
                 {loadingMessages && messages.length === 0 ? (
                   <Box className="dm-state"><CircularProgress size={26} /></Box>
-                ) : messages.length === 0 ? (
-                  <Box className="dm-center-empty">
-                    <Box className="dm-center-empty__icon"><ChatBubbleOutlineRoundedIcon /></Box>
-                    <Typography className="dm-center-empty__title">{copy.emptyPanelTitle}</Typography>
-                    <Typography className="dm-center-empty__body">{copy.emptyPanelBody}</Typography>
-                  </Box>
-                ) : messages.map((message) => {
+                ) : messages.length === 0 ? null : messages.map((message) => {
                   const mine = Number(message.senderId) === Number(user?.userId);
                   return (
                     <Box className={mine ? 'dm-message-row dm-message-row--mine' : 'dm-message-row'} key={message.messageId}>
