@@ -10,6 +10,7 @@ import FormatQuoteRoundedIcon from '@mui/icons-material/FormatQuoteRounded';
 import { getNotices, markAllNoticesRead, markNoticeRead } from '../../api/noticeApi';
 
 const PAGE_SIZE = 20;
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
 
 const copy = {
   title: '알림',
@@ -21,6 +22,11 @@ const copy = {
   unread: '안 읽음',
   read: '읽음',
 };
+
+function resolveMediaUrl(fileUrl) {
+  if (!fileUrl) return '';
+  return String(fileUrl).startsWith('http') ? fileUrl : API_BASE_URL + fileUrl;
+}
 
 function getInitial(notice) {
   return String(notice?.sender?.nickname || notice?.sender?.username || 'L').charAt(0).toUpperCase();
@@ -212,7 +218,7 @@ function Alerts() {
               tabIndex={0}
             >
               <Box className="notice-card__icon">{getNoticeIcon(notice.type)}</Box>
-              <Avatar className="main-avatar notice-card__avatar">{getInitial(notice)}</Avatar>
+              <Avatar className="main-avatar notice-card__avatar" src={resolveMediaUrl(notice.sender?.profileImageUrl)}>{getInitial(notice)}</Avatar>
               <Box className="notice-card__body">
                 <Typography className="notice-card__message">{getNoticeMessage(notice)}</Typography>
                 <Typography className="notice-card__meta">{formatRelativeTime(notice.createdAt)} · {notice.isRead ? copy.read : copy.unread}</Typography>

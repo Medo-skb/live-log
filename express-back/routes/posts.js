@@ -859,7 +859,7 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
     const categoryName = categoryCheck.rows[0].NAME || '';
     aiAnalysis = await analyzePostContent({ categoryName, workTitle, progress, content });
     isSpoiler = aiAnalysis.isSpoiler ? 1 : 0;
-    tags = mergeTags(extractTags(content, req.body.tags), aiAnalysis.tags);
+    tags = extractTags(content, req.body.tags);
 
     const workId = await findOrCreateWork(connection, categoryId, workTitle);
     const inserted = await connection.execute(
@@ -1374,7 +1374,7 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
     const categoryName = categoryCheck.rows[0].NAME || '';
     aiAnalysis = await analyzePostContent({ categoryName, workTitle, progress, content });
     isSpoiler = aiAnalysis.isSpoiler ? 1 : 0;
-    tags = mergeTags(extractTags(content, req.body.tags), aiAnalysis.tags);
+    tags = extractTags(content, req.body.tags);
 
     const workId = await findOrCreateWork(connection, categoryId, workTitle);
 

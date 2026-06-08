@@ -1,0 +1,5 @@
+**/node_modules/
+react-front/build/
+express-back/uploads/
+**/.env*
+*.sql

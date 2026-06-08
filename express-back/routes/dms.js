@@ -32,6 +32,7 @@ function mapUserRow(row, prefix = '') {
     userId: row[prefix + 'USER_ID'],
     username: row[prefix + 'USERNAME'],
     nickname: row[prefix + 'NICKNAME'],
+    profileImageUrl: row[prefix + 'PROFILE_IMAGE_URL'] || '',
   };
 }
 
@@ -49,7 +50,7 @@ function mapMessageRow(row) {
 async function findUserByUsername(connection, username) {
   const result = await connection.execute(
     `
-      SELECT USER_ID, USERNAME, NICKNAME
+      SELECT USER_ID, USERNAME, NICKNAME, PROFILE_IMAGE_URL
       FROM USERS
       WHERE USERNAME = :username
         AND ROLE <> 'ADMIN'
@@ -64,7 +65,7 @@ async function findUserByUsername(connection, username) {
 async function getUserById(connection, userId) {
   const result = await connection.execute(
     `
-      SELECT USER_ID, USERNAME, NICKNAME
+      SELECT USER_ID, USERNAME, NICKNAME, PROFILE_IMAGE_URL
       FROM USERS
       WHERE USER_ID = :userId
         AND ROLE <> 'ADMIN'
@@ -186,6 +187,7 @@ router.get('/conversations', jwtAuthentication, async (req, res) => {
           other_user.USER_ID,
           other_user.USERNAME,
           other_user.NICKNAME,
+          other_user.PROFILE_IMAGE_URL,
           last_dm.MESSAGE_ID,
           last_dm.CONTENT,
           TO_CHAR(last_dm.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS CREATED_AT,
@@ -495,10 +497,11 @@ router.post('/:username/messages', jwtAuthentication, async (req, res) => {
 
     await connection.commit();
 
-    const senderUser = {
+    const senderUser = await getUserById(connection, req.user.userId) || {
       userId: req.user.userId,
       username: req.user.username,
       nickname: req.user.nickname || req.user.username,
+      profileImageUrl: '',
     };
     const message = mapMessageRow(messageResult.rows[0]);
     const receiverUnreadCount = await getUnreadDmCount(connection, targetUser.userId);

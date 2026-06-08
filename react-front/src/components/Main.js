@@ -26,13 +26,20 @@ import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import SettingsRoundedIcon from '@mui/icons-material/SettingsRounded';
 import WhatshotRoundedIcon from '@mui/icons-material/WhatshotRounded';
 import { getTrendingTags } from '../api/searchApi';
-import { getRecommendedUsers } from '../api/userApi';
+import { getRecommendedUsers, getUserProfile } from '../api/userApi';
 import PostComposerDialog from './post/PostComposerDialog';
 import { getUnreadNoticeCount } from '../api/noticeApi';
 import { getUnreadDmCount } from '../api/dmApi';
+import { getAuthUser, updateAuthUser } from '../utils/authStorage';
 import { connectSocket, disconnectSocket } from '../socket/socketClient';
 import '../css/main.css';
 
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
+
+function resolveMediaUrl(fileUrl) {
+  if (!fileUrl) return '';
+  return String(fileUrl).startsWith('http') ? fileUrl : API_BASE_URL + fileUrl;
+}
 const THEME_MODE_KEY = 'liveLogThemeMode';
 
 const copy = {
@@ -74,11 +81,7 @@ function getStoredThemeMode() {
 }
 
 function getStoredUser() {
-  try {
-    return JSON.parse(localStorage.getItem('user') || 'null');
-  } catch (error) {
-    return null;
-  }
+  return getAuthUser();
 }
 
 function hasSelectedCategories(user) {
@@ -108,7 +111,7 @@ function Main() {
 
   const displayName = user?.nickname || user?.username || '사용자';
   const accountId = user?.username || 'guest';
-  const avatarSrc = user?.profileImage || user?.picture || '';
+  const avatarSrc = resolveMediaUrl(user?.profileImageUrl || user?.profileImage || user?.picture || '');
   const isDarkMode = themeMode === 'dark';
   const isChatPage = location.pathname.startsWith('/chat');
   const profilePath = '/' + accountId;
@@ -116,10 +119,50 @@ function Main() {
   const resolvedNavItems = [...navItems, ...adminNavItems].map((item) => (item.path === '__PROFILE_PATH__' ? { ...item, path: profilePath } : item));
 
   useEffect(() => {
+    if (String(user?.role || '').toUpperCase() === 'ADMIN') {
+      navigate('/admin', { replace: true });
+      return;
+    }
+
     if (!hasSelectedCategories(user) && location.pathname !== '/onboarding') {
       navigate('/onboarding', { replace: true });
     }
   }, [location.pathname, navigate, user]);
+
+
+  useEffect(() => {
+    if (!user?.username) return undefined;
+
+    let ignore = false;
+
+    getUserProfile({ username: user.username })
+      .then((data) => {
+        const profile = data.profile;
+        if (ignore || !profile) return;
+
+        setUser((prevUser) => {
+          if (!prevUser || String(prevUser.username) !== String(profile.username)) return prevUser;
+
+          const nextUser = {
+            ...prevUser,
+            nickname: profile.nickname || prevUser.nickname,
+            role: profile.role || prevUser.role,
+            profileImage: profile.profileImageUrl || prevUser.profileImage,
+            profileImageUrl: profile.profileImageUrl || prevUser.profileImageUrl,
+            bannerImage: profile.bannerImageUrl || prevUser.bannerImage,
+            bannerImageUrl: profile.bannerImageUrl || prevUser.bannerImageUrl,
+            categories: Array.isArray(prevUser.categories) ? prevUser.categories : [],
+          };
+          updateAuthUser(nextUser);
+          return nextUser;
+        });
+      })
+      .catch(() => {});
+
+    return () => {
+      ignore = true;
+    };
+  }, [user?.username]);
 
 
   useEffect(() => {
@@ -296,7 +339,7 @@ function Main() {
         <Box className="main-account-wrap">
           {profileMenuOpen && (
             <Box className="main-account-menu">
-              <Button className="main-account-menu__item" fullWidth startIcon={<SettingsRoundedIcon />}>
+              <Button className="main-account-menu__item" fullWidth onClick={() => { setProfileMenuOpen(false); navigate('/settings'); }} startIcon={<SettingsRoundedIcon />}>
                 {copy.settings}
               </Button>
               <Button
@@ -325,7 +368,7 @@ function Main() {
         </Box>
       </Box>
 
-      <Outlet context={{ accountId, avatarSrc, displayName, isDarkMode, setUser, user }} />
+      <Outlet context={{ accountId, avatarSrc, displayName, isDarkMode, setThemeMode, setUser, themeMode, user }} />
 
       <PostComposerDialog
         avatarSrc={avatarSrc}
@@ -381,7 +424,7 @@ function Main() {
             <Stack divider={<Divider />}>
               {recommendedUsers.map((targetUser) => (
                 <Button className="main-recommend-user" fullWidth key={targetUser.userId} onClick={() => navigate('/' + encodeURIComponent(targetUser.username))}>
-                  <Avatar className="main-avatar main-recommend-user__avatar">{String(targetUser.nickname || targetUser.username || 'L').charAt(0).toUpperCase()}</Avatar>
+                  <Avatar className="main-avatar main-recommend-user__avatar" src={resolveMediaUrl(targetUser.profileImageUrl)}>{String(targetUser.nickname || targetUser.username || 'L').charAt(0).toUpperCase()}</Avatar>
                   <Box className="main-recommend-user__text">
                     <Typography className="main-recommend-user__name">{targetUser.nickname || targetUser.username}</Typography>
                     <Typography className="main-recommend-user__username">@{targetUser.username}</Typography>
@@ -397,3 +440,4 @@ function Main() {
 }
 
 export default Main;
+

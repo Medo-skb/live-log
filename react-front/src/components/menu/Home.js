@@ -98,6 +98,14 @@ function resolveMediaUrl(fileUrl) {
   return fileUrl.startsWith('http') ? fileUrl : API_BASE_URL + fileUrl;
 }
 
+function parseManualTags(value) {
+  return [...new Set(String(value || '')
+    .split(/[\s,]+/)
+    .map((tag) => tag.replace(/^#/, '').trim())
+    .filter(Boolean))]
+    .slice(0, 5);
+}
+
 function isPostVisibleByCategory(post, activeCategoryId) {
   return activeCategoryId === CATEGORY_ALL_ID || post.categoryId === activeCategoryId;
 }
@@ -235,6 +243,8 @@ function Home() {
   const { avatarSrc, displayName, isDarkMode, user } = useOutletContext();
   const [activeCategoryId, setActiveCategoryId] = useState(CATEGORY_ALL_ID);
   const [content, setContent] = useState('');
+  const [tagInputOpen, setTagInputOpen] = useState(false);
+  const [tagInput, setTagInput] = useState('');
   const [workTitle, setWorkTitle] = useState('');
   const [progress, setProgress] = useState('');
   const [categoryId, setCategoryId] = useState('');
@@ -259,6 +269,7 @@ function Home() {
   const [repostMenuAnchorEl, setRepostMenuAnchorEl] = useState(null);
   const [repostMenuPost, setRepostMenuPost] = useState(null);
   const [quoteDialogPost, setQuoteDialogPost] = useState(null);
+  const [revealedSpoilerPosts, setRevealedSpoilerPosts] = useState({});
   const mediaInputRef = useRef(null);
   const loadMoreTargetRef = useRef(null);
   const loadMoreRef = useRef(null);
@@ -275,6 +286,10 @@ function Home() {
   const isPostMenuOpen = Boolean(postMenuAnchorEl);
   const isPostMenuMine = isMyPost(postMenuPost, user);
   const isRepostMenuOpen = Boolean(repostMenuAnchorEl);
+  const handleRevealSpoiler = (event, postId) => {
+    event.stopPropagation();
+    setRevealedSpoilerPosts((prev) => ({ ...prev, [postId]: true }));
+  };
 
   useEffect(() => {
     postsRef.current = posts;
@@ -404,6 +419,8 @@ function Home() {
     setWorkTitle('');
     setProgress('');
     setContent('');
+    setTagInput('');
+    setTagInputOpen(false);
     setSelectedMediaFiles([]);
     setEditingPostId(null);
     if (mediaInputRef.current) mediaInputRef.current.value = '';
@@ -411,6 +428,11 @@ function Home() {
 
   const handleContentChange = (event) => {
     setContent(event.target.value);
+  };
+
+  const handleOpenProfile = (event, postUser) => {
+    event.stopPropagation();
+    if (postUser?.username) navigate('/' + encodeURIComponent(postUser.username));
   };
 
   const handleOpenPostDetail = (post) => {
@@ -440,6 +462,8 @@ function Home() {
     setWorkTitle(postMenuPost.workTitle || '');
     setProgress(postMenuPost.progress || '');
     setContent(postMenuPost.content || '');
+    setTagInput((postMenuPost.tags || []).map((tag) => '#' + tag).join(' '));
+    setTagInputOpen(Boolean((postMenuPost.tags || []).length));
     setSelectedMediaFiles([]);
     if (mediaInputRef.current) mediaInputRef.current.value = '';
     handlePostMenuClose();
@@ -746,6 +770,7 @@ function Home() {
         workTitle: workTitle.trim(),
         progress: progress.trim(),
         content: content.trim(),
+        tags: parseManualTags(tagInput),
       };
       const data = editingPostId
         ? await updatePost({ postId: editingPostId, ...payload })
@@ -833,7 +858,7 @@ function Home() {
                 ref={mediaInputRef}
                 type="file"
               />
-              <Button className="main-tool-text-button" startIcon={<TagRoundedIcon />}>
+              <Button className="main-tool-text-button" onClick={() => setTagInputOpen((prev) => !prev)} startIcon={<TagRoundedIcon />}>
                 {copy.tagButton}
               </Button>
             </Stack>
@@ -841,8 +866,16 @@ function Home() {
               <Button className="main-submit-button main-submit-button--post" disabled={isSubmitDisabled} onClick={handleSubmit} size="large" variant="contained">
                 {submitLoading ? copy.submitting : editingPostId ? copy.updateSubmit : copy.submit}
               </Button>
-            </Stack>
-          </Box>
+            </Stack>          </Box>
+          {tagInputOpen && (
+            <TextField
+              className="main-tag-input"
+              fullWidth
+              onChange={(event) => setTagInput(event.target.value)}
+              placeholder="태그를 직접 입력하세요. 예: #결말 #엔딩게임"
+              value={tagInput}
+            />
+          )}
           <MediaPreviewList files={selectedMediaFiles} onRemove={handleRemoveMediaFile} />
           {error && <Alert severity="error" className="main-form-alert">{error}</Alert>}
         </Box>
@@ -863,18 +896,29 @@ function Home() {
       ) : (
         <>
           <Stack className="main-post-list">
-            {posts.map((post) => (
+            {posts.map((post) => {
+              const spoilerHidden = Boolean(post.isSpoiler && !isMyPost(post, user) && !revealedSpoilerPosts[post.postId]);
+
+              return (
               <Box component="article" className="main-post main-post--clickable" key={getTimelineKey(post)} onClick={() => handleOpenPostDetail(post)} onKeyDown={(event) => { if (event.key === 'Enter') handleOpenPostDetail(post); }} role="button" tabIndex={0}>
-                <Avatar className="main-avatar" src={resolveMediaUrl(post.user.profileImageUrl || post.user.profileImage)}>{post.user.nickname.charAt(0)}</Avatar>
-                <Box className="main-post__body">
+                <Avatar className="main-avatar main-post__profile-link" onClick={(event) => handleOpenProfile(event, post.user)} src={resolveMediaUrl(post.user.profileImageUrl || post.user.profileImage)}>{post.user.nickname.charAt(0)}</Avatar>
+                <Box className={spoilerHidden ? 'main-post__body main-post__body--spoiler-hidden' : 'main-post__body'}>
                   {post.repostedBy && <Typography className="main-repost-label"><RepeatRoundedIcon /> {getRepostLabel(post, user)}</Typography>}
                   <Box className="main-post__topline">
                     <Box className="main-post__author-line">
-                      <Typography className="main-post__name">{post.user.nickname}</Typography>
+                      <Typography className="main-post__name main-post__profile-link" onClick={(event) => handleOpenProfile(event, post.user)}>{post.user.nickname}</Typography>
                       <Typography className="main-post__meta">@{formatPostUsername(post.user.username)} · {formatRelativeTime(post.createdAt)}</Typography>
                     </Box>
                     <IconButton aria-label="more" className="main-icon-button main-icon-button--small" onClick={(event) => { event.stopPropagation(); handlePostMenuOpen(event, post); }}><MoreHorizRoundedIcon /></IconButton>
                   </Box>
+
+                  {spoilerHidden && (
+                    <Box className="main-spoiler-gate" onClick={(event) => event.stopPropagation()}>
+                      <Typography className="main-spoiler-gate__title">스포일러가 포함된 글입니다.</Typography>
+                      <Typography className="main-spoiler-gate__message">태그, 이미지, 인용글에 스포일러가 포함될 수 있습니다.</Typography>
+                      <Button className="main-spoiler-gate__button" onClick={(event) => handleRevealSpoiler(event, post.postId)}>게시글 보기</Button>
+                    </Box>
+                  )}
 
                   <Box className="main-work-chip-row">
                     <Chip className="main-work-chip" label={post.categoryName} size="small" />
@@ -983,7 +1027,8 @@ function Home() {
                   )}
                 </Box>
               </Box>
-            ))}
+              );
+            })}
           </Stack>
 
           <Popover

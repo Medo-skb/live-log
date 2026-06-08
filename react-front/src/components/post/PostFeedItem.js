@@ -193,6 +193,7 @@ function PostFeedItem({ isDarkMode = false, onDeleted, onOpen, post, showActions
   const [commentLoading, setCommentLoading] = useState(false);
   const [commentSubmitting, setCommentSubmitting] = useState(false);
   const [reactionLoadingKey, setReactionLoadingKey] = useState('');
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
   const replyInputRef = useRef(null);
 
   useEffect(() => {
@@ -205,9 +206,18 @@ function PostFeedItem({ isDarkMode = false, onDeleted, onOpen, post, showActions
   const repostMenuOpen = Boolean(repostMenuAnchorEl);
   const repostLabel = getRepostLabel(displayPost, viewer);
   const visibleTags = getVisibleTags(displayPost);
+  const spoilerHidden = Boolean(displayPost.isSpoiler && !mine && !spoilerRevealed);
 
   const stopActionClick = (event) => event.stopPropagation();
   const handleOpen = () => onOpen?.(displayPost);
+  const handleOpenProfile = (event) => {
+    event.stopPropagation();
+    if (user.username) navigate('/' + encodeURIComponent(user.username));
+  };
+  const handleRevealSpoiler = (event) => {
+    event.stopPropagation();
+    setSpoilerRevealed(true);
+  };
 
   const handleOpenPostPhoto = (event, photoIndex) => {
     event.stopPropagation();
@@ -384,16 +394,24 @@ function PostFeedItem({ isDarkMode = false, onDeleted, onOpen, post, showActions
 
   return (
     <Box component="article" className="main-post main-post--clickable" onClick={handleOpen} onKeyDown={(event) => { if (event.key === 'Enter') handleOpen(); }} role="button" tabIndex={0}>
-      <Avatar className="main-avatar" src={resolveMediaUrl(user.profileImageUrl || user.profileImage)}>{getInitial(user.nickname, user.username)}</Avatar>
-      <Box className="main-post__body">
+      <Avatar className="main-avatar main-post__profile-link" onClick={handleOpenProfile} src={resolveMediaUrl(user.profileImageUrl || user.profileImage)}>{getInitial(user.nickname, user.username)}</Avatar>
+      <Box className={spoilerHidden ? 'main-post__body main-post__body--spoiler-hidden' : 'main-post__body'}>
         {repostLabel && <Typography className="main-repost-label"><RepeatRoundedIcon /> {repostLabel}</Typography>}
         <Box className="main-post__topline">
           <Box className="main-post__author-line">
-            <Typography className="main-post__name">{user.nickname || user.username}</Typography>
+            <Typography className="main-post__name main-post__profile-link" onClick={handleOpenProfile}>{user.nickname || user.username}</Typography>
             <PostMeta username={user.username} createdAt={displayPost.createdAt} />
           </Box>
           {showMenu && <IconButton aria-label="more" className="main-icon-button main-icon-button--small" onClick={handleMenuOpen}><MoreHorizRoundedIcon /></IconButton>}
         </Box>
+
+        {spoilerHidden && (
+          <Box className="main-spoiler-gate" onClick={stopActionClick}>
+            <Typography className="main-spoiler-gate__title">스포일러가 포함된 글입니다.</Typography>
+            <Typography className="main-spoiler-gate__message">태그, 이미지, 인용글에 스포일러가 포함될 수 있습니다.</Typography>
+            <Button className="main-spoiler-gate__button" onClick={handleRevealSpoiler}>게시글 보기</Button>
+          </Box>
+        )}
 
         <Box className="main-work-chip-row">
           {displayPost.categoryName && <Chip className="main-work-chip" label={displayPost.categoryName} size="small" />}

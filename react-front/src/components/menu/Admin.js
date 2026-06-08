@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from '@mui/material';
 import AdminPanelSettingsRoundedIcon from '@mui/icons-material/AdminPanelSettingsRounded';
 import ReportProblemRoundedIcon from '@mui/icons-material/ReportProblemRounded';
 import { getReports, updateReport } from '../../api/adminApi';
 import { useAppModal } from '../common/ModalProvider';
+import { getAuthUser } from '../../utils/authStorage';
 
 const PAGE_SIZE = 20;
 
@@ -22,7 +23,7 @@ function getStatusLabel(status) {
 function Admin() {
   const navigate = useNavigate();
   const appModal = useAppModal();
-  const { user } = useOutletContext();
+  const user = getAuthUser();
   const [reports, setReports] = useState([]);
   const [status, setStatus] = useState('PENDING');
   const [nextCursor, setNextCursor] = useState(null);
@@ -84,14 +85,14 @@ function Admin() {
 
   if (String(user?.role || '').toUpperCase() !== 'ADMIN') {
     return (
-      <Box component="main" className="main-feed admin-page">
+      <Box component="main" className="admin-page admin-page--standalone">
         <Box className="main-feed-state"><Typography>관리자 권한이 없습니다.</Typography></Box>
       </Box>
     );
   }
 
   return (
-    <Box component="main" className="main-feed admin-page">
+    <Box component="main" className="admin-page admin-page--standalone">
       <Box className="menu-page-header menu-page-header--row">
         <Box>
           <Typography className="menu-page-header__title"><AdminPanelSettingsRoundedIcon /> 관리자</Typography>

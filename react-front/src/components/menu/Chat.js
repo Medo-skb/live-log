@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useOutletContext } from 'react-router-dom';
+import { useNavigate, useOutletContext, useSearchParams } from 'react-router-dom';
 import {
   Alert,
   Avatar,
@@ -24,6 +24,7 @@ import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
 import ExpandMoreRoundedIcon from '@mui/icons-material/ExpandMoreRounded';
 import InboxOutlinedIcon from '@mui/icons-material/InboxOutlined';
 import MailOutlineRoundedIcon from '@mui/icons-material/MailOutlineRounded';
+import NotificationsNoneRoundedIcon from '@mui/icons-material/NotificationsNoneRounded';
 import SearchRoundedIcon from '@mui/icons-material/SearchRounded';
 import SendRoundedIcon from '@mui/icons-material/SendRounded';
 import { deleteDmMessage, getDmConversations, getDmMessages, markDmConversationRead, sendDmMessage } from '../../api/dmApi';
@@ -33,6 +34,7 @@ import { useAppModal } from '../common/ModalProvider';
 
 const PAGE_SIZE = 30;
 const MAX_MESSAGE_LENGTH = 2000;
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
 
 const copy = {
   title: '채팅',
@@ -69,6 +71,11 @@ const copy = {
   blockButton: '차단',
   cancel: '취소',
 };
+
+function resolveMediaUrl(fileUrl) {
+  if (!fileUrl) return '';
+  return String(fileUrl).startsWith('http') ? fileUrl : API_BASE_URL + fileUrl;
+}
 
 function getInitial(user) {
   return String(user?.nickname || user?.username || 'L').charAt(0).toUpperCase();
@@ -121,6 +128,8 @@ function getTotalUnread(conversations) {
 
 function Chat() {
   const appModal = useAppModal();
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { isDarkMode, user } = useOutletContext();
   const [conversations, setConversations] = useState([]);
   const [selectedUser, setSelectedUser] = useState(null);
@@ -147,6 +156,7 @@ function Chat() {
 
   const selectedKey = useMemo(() => getConversationKey(selectedUser), [selectedUser]);
   const selectedUsername = selectedUser?.username || '';
+  const directChatUsername = searchParams.get('to') || '';
   const filteredConversations = conversations.filter((conversation) => {
     if (requestsOpen && !conversation.isRequest) return false;
     if (!requestsOpen && conversation.isRequest) return false;
@@ -276,6 +286,36 @@ function Chat() {
   }, [searchKeyword]);
 
   useEffect(() => {
+    const username = directChatUsername.trim();
+    if (!username || selectedUsername === username) return undefined;
+
+    const existingConversation = conversations.find((conversation) => conversation.user?.username === username);
+    if (existingConversation) {
+      setSelectedUser(existingConversation.user);
+      setSearchParams({}, { replace: true });
+      return undefined;
+    }
+
+    let ignore = false;
+    searchUsers({ keyword: username, limit: 5 })
+      .then((data) => {
+        if (ignore) return;
+        const users = Array.isArray(data.users) ? data.users : [];
+        const targetUser = users.find((item) => item.username === username) || users[0];
+        if (targetUser && String(targetUser.role || 'USER').toUpperCase() !== 'ADMIN') {
+          setSelectedUser(targetUser);
+        }
+        setSearchParams({}, { replace: true });
+      })
+      .catch(() => {
+        if (!ignore) setSearchParams({}, { replace: true });
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [conversations, directChatUsername, selectedUsername, setSearchParams]);
+  useEffect(() => {
     if (!newChatOpen) return undefined;
 
     let ignore = false;
@@ -297,6 +337,36 @@ function Chat() {
     };
   }, [newChatOpen]);
 
+  useEffect(() => {
+    const username = directChatUsername.trim();
+    if (!username || selectedUsername === username) return undefined;
+
+    const existingConversation = conversations.find((conversation) => conversation.user?.username === username);
+    if (existingConversation) {
+      setSelectedUser(existingConversation.user);
+      setSearchParams({}, { replace: true });
+      return undefined;
+    }
+
+    let ignore = false;
+    searchUsers({ keyword: username, limit: 5 })
+      .then((data) => {
+        if (ignore) return;
+        const users = Array.isArray(data.users) ? data.users : [];
+        const targetUser = users.find((item) => item.username === username) || users[0];
+        if (targetUser && String(targetUser.role || 'USER').toUpperCase() !== 'ADMIN') {
+          setSelectedUser(targetUser);
+        }
+        setSearchParams({}, { replace: true });
+      })
+      .catch(() => {
+        if (!ignore) setSearchParams({}, { replace: true });
+      });
+
+    return () => {
+      ignore = true;
+    };
+  }, [conversations, directChatUsername, selectedUsername, setSearchParams]);
   useEffect(() => {
     if (!newChatOpen) return undefined;
 
@@ -501,6 +571,7 @@ function Chat() {
           <Box className="dm-header">
             <Typography className="dm-header__title">{conversationTitle}</Typography>
             <Button className="dm-filter-button" endIcon={<ExpandMoreRoundedIcon />} onClick={(event) => setFilterAnchorEl(event.currentTarget)}>{conversationFilterLabel}</Button>
+            <Tooltip title="알림"><IconButton className="dm-header-icon" onClick={() => navigate('/alerts')}><NotificationsNoneRoundedIcon /></IconButton></Tooltip>
             <Tooltip title={copy.messageRequests}><IconButton className={requestsOpen ? 'dm-header-icon dm-header-icon--active' : 'dm-header-icon'} onClick={handleOpenRequests}><MailOutlineRoundedIcon /></IconButton></Tooltip>
             <Tooltip title={copy.newChat}><IconButton className="dm-header-icon" onClick={handleOpenNewChat}><ChatBubbleOutlineRoundedIcon /></IconButton></Tooltip>
           </Box>
@@ -551,7 +622,7 @@ function Chat() {
                     key={getConversationKey(conversationUser)}
                     onClick={() => handleSelectUser(conversationUser)}
                   >
-                    <Avatar className="main-avatar dm-conversation__avatar">{getInitial(conversationUser)}</Avatar>
+                    <Avatar className="main-avatar dm-conversation__avatar" src={resolveMediaUrl(conversationUser.profileImageUrl || conversationUser.profileImage)}>{getInitial(conversationUser)}</Avatar>
                     <Box className="dm-conversation__body">
                       <Typography className="dm-conversation__name">{conversationUser.nickname}</Typography>
                       <Typography className="dm-conversation__message">
@@ -570,7 +641,7 @@ function Chat() {
           {selectedUser ? (
             <>
               <Box className="dm-message-header">
-                <Avatar className="main-avatar dm-message-header__avatar">{getInitial(selectedUser)}</Avatar>
+                <Avatar className="main-avatar dm-message-header__avatar" src={resolveMediaUrl(selectedUser.profileImageUrl || selectedUser.profileImage)}>{getInitial(selectedUser)}</Avatar>
                 <Box className="dm-message-header__text">
                   <Typography className="dm-message-header__name">{selectedUser.nickname}</Typography>
                   <Typography className="dm-message-header__username">@{selectedUser.username}</Typography>
@@ -694,7 +765,7 @@ function Chat() {
                   key={getConversationKey(targetUser)}
                   onClick={() => handleStartNewChat(targetUser)}
                 >
-                  <Avatar className="main-avatar dm-new-chat-user__avatar">{getInitial(targetUser)}</Avatar>
+                  <Avatar className="main-avatar dm-new-chat-user__avatar" src={resolveMediaUrl(targetUser.profileImageUrl || targetUser.profileImage)}>{getInitial(targetUser)}</Avatar>
                   <Box className="dm-new-chat-user__body">
                     <Box className="dm-new-chat-user__name-row">
                       <Typography className="dm-new-chat-user__name">{targetUser.nickname}</Typography>

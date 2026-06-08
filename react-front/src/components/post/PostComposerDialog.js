@@ -46,6 +46,14 @@ const copy = {
   tagButton: '태그',
 };
 
+function parseManualTags(value) {
+  return [...new Set(String(value || '')
+    .split(/[\s,]+/)
+    .map((tag) => tag.replace(/^#/, '').trim())
+    .filter(Boolean))]
+    .slice(0, 5);
+}
+
 function parsePostCreatedAt(createdAt) {
   if (!createdAt) return null;
 
@@ -112,6 +120,8 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
   const [workTitle, setWorkTitle] = useState('');
   const [progress, setProgress] = useState('');
   const [content, setContent] = useState('');
+  const [tagInputOpen, setTagInputOpen] = useState(false);
+  const [tagInput, setTagInput] = useState('');
   const [submitLoading, setSubmitLoading] = useState(false);
   const [error, setError] = useState('');
   const [selectedMediaFiles, setSelectedMediaFiles] = useState([]);
@@ -128,6 +138,8 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
     setWorkTitle('');
     setProgress('');
     setContent('');
+    setTagInput('');
+    setTagInputOpen(false);
     setError('');
     setSelectedMediaFiles([]);
     if (mediaInputRef.current) mediaInputRef.current.value = '';
@@ -176,6 +188,7 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
         workTitle: isQuoteMode ? quotePost.workTitle : workTitle.trim(),
         progress: isQuoteMode ? quotePost.progress : progress.trim(),
         content: content.trim(),
+        tags: parseManualTags(tagInput),
         mediaFiles: selectedMediaFiles,
         quotePostId: quotePost?.postId,
       });
@@ -255,7 +268,7 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
                   ref={mediaInputRef}
                   type="file"
                 />
-                <Button className="main-tool-text-button" startIcon={<TagRoundedIcon />}>
+                <Button className="main-tool-text-button" onClick={() => setTagInputOpen((prev) => !prev)} startIcon={<TagRoundedIcon />}>
                   {copy.tagButton}
                 </Button>
               </Stack>
@@ -263,9 +276,17 @@ function PostComposerDialog({ avatarSrc, displayName, isDarkMode, onClose, onPos
                 <Button className="main-submit-button main-submit-button--post" disabled={isSubmitDisabled} onClick={handleSubmit} size="large" variant="contained">
                   {submitLoading ? copy.submitting : copy.submit}
                 </Button>
-              </Stack>
-            </Box>
-          <MediaPreviewList files={selectedMediaFiles} onRemove={handleRemoveMediaFile} />
+              </Stack>            </Box>
+            {tagInputOpen && (
+              <TextField
+                className="main-tag-input"
+                fullWidth
+                onChange={(event) => setTagInput(event.target.value)}
+                placeholder="태그를 직접 입력하세요. 예: #결말 #엔딩게임"
+                value={tagInput}
+              />
+            )}
+            <MediaPreviewList files={selectedMediaFiles} onRemove={handleRemoveMediaFile} />
           {error && <Alert severity="error" className="main-form-alert">{error}</Alert>}
           </Box>
         </Box>

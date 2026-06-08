@@ -17,6 +17,7 @@ import PostDetail from './components/menu/PostDetail';
 import PhotoViewer from './components/menu/PhotoViewer';
 import Onboarding from './components/menu/Onboarding';
 import Admin from './components/menu/Admin';
+import Settings from './components/menu/Settings';
 import ProtectedRoute from './components/common/ProtectedRoute';
 import { ModalProvider } from './components/common/ModalProvider';
 import './css/layout.css';
@@ -31,6 +32,7 @@ function App() {
           <Route path="/join" element={<Join />} />
           <Route path="/verify-email" element={<EmailVerify />} />
           <Route element={<ProtectedRoute />}>
+            <Route path="/admin" element={<ModalProvider><Admin /></ModalProvider>} />
             <Route element={<ModalProvider><Main /></ModalProvider>}>
               <Route path="/home" element={<Home />} />
               <Route path="/onboarding" element={<Onboarding />} />
@@ -39,7 +41,8 @@ function App() {
               <Route path="/follow" element={<Follow />} />
               <Route path="/chat" element={<Chat />} />
               <Route path="/bookmark" element={<Bookmark />} />
-              <Route path="/admin" element={<Admin />} />
+              <Route path="/settings" element={<Settings />} />
+
               <Route path="/:username/status/:postId/photo/:photoIndex" element={<PhotoViewer />} />
               <Route path="/:username/status/:postId" element={<PostDetail />} />
               <Route path="/:username/following" element={<UserConnections />} />

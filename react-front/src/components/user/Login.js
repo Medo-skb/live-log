@@ -221,7 +221,7 @@ function Login() {
           </Box>
         </Box>
 
-        <Box className="auth-form auth-form--x">
+        <Box className="auth-form auth-form--x" component="form" onSubmit={handleLogin}>
           <Stack spacing={2.2}>
             <Box>
               <Typography component="h2" variant="h4" className="auth-x-form-title">

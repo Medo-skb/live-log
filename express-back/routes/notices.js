@@ -29,6 +29,7 @@ function mapNoticeRow(row) {
       userId: row.SENDER_ID,
       username: row.SENDER_USERNAME,
       nickname: row.SENDER_NICKNAME,
+      profileImageUrl: row.SENDER_PROFILE_IMAGE_URL || '',
     } : null,
     targetPost: row.TARGET_POST_ID ? {
       postId: row.TARGET_POST_ID,
@@ -65,6 +66,7 @@ router.get('/', jwtAuthentication, async (req, res) => {
             s.USER_ID AS SENDER_ID,
             s.USERNAME AS SENDER_USERNAME,
             s.NICKNAME AS SENDER_NICKNAME,
+            s.PROFILE_IMAGE_URL AS SENDER_PROFILE_IMAGE_URL,
             tp.POST_ID AS TARGET_POST_ID,
             tu.USERNAME AS TARGET_POST_USERNAME
           FROM NOTICE n

@@ -198,11 +198,13 @@ function PostDetail() {
   const [postMenuAnchorEl, setPostMenuAnchorEl] = useState(null);
   const [repostMenuAnchorEl, setRepostMenuAnchorEl] = useState(null);
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
   const [error, setError] = useState('');
 
   const isPostMenuOpen = Boolean(postMenuAnchorEl);
   const isPostMenuMine = isMyPost(post, user);
   const isRepostMenuOpen = Boolean(repostMenuAnchorEl);
+  const spoilerHidden = Boolean(post?.isSpoiler && !isPostMenuMine && !spoilerRevealed);
 
   useEffect(() => {
     let ignore = false;
@@ -435,7 +437,7 @@ function PostDetail() {
         <Box className="main-feed-state"><Typography>게시글을 찾을 수 없습니다.</Typography></Box>
       ) : (
         <>
-          <Box className="post-detail-card">
+          <Box className={spoilerHidden ? 'post-detail-card post-detail-card--spoiler-hidden' : 'post-detail-card'}>
             <Box className="post-detail-author-row">
               <Avatar className="main-avatar" src={resolveMediaUrl(post.user.profileImageUrl || post.user.profileImage)}>{post.user.nickname.charAt(0)}</Avatar>
               <Box className="post-detail-author-row__text">
@@ -446,6 +448,14 @@ function PostDetail() {
                 <MoreHorizRoundedIcon />
               </IconButton>
             </Box>
+
+            {spoilerHidden && (
+              <Box className="main-spoiler-gate">
+                <Typography className="main-spoiler-gate__title">스포일러가 포함된 글입니다.</Typography>
+                <Typography className="main-spoiler-gate__message">태그, 이미지, 인용글에 스포일러가 포함될 수 있습니다.</Typography>
+                <Button className="main-spoiler-gate__button" onClick={() => setSpoilerRevealed(true)}>게시글 보기</Button>
+              </Box>
+            )}
 
             <Stack className="main-work-chip-row" direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
               <Chip className="main-work-chip" label={post.categoryName} size="small" />
