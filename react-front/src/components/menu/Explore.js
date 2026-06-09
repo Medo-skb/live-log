@@ -81,7 +81,7 @@ function Explore() {
     if (!queryKeyword.trim()) return;
     if (queryKeyword === searchedKeyword) return;
     requestSearch(queryKeyword, { skipUrlUpdate: true });
-  // searchedKeyword?? ???? ??? ?? ?? ?? ?? ??? ? ????.
+  // searchedKeyword를 의존성에 추가하면 같은 검색어로 URL이 반복 갱신될 수 있습니다.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 

@@ -32,6 +32,7 @@ function mapUserRow(row, prefix = '') {
     userId: row[prefix + 'USER_ID'],
     username: row[prefix + 'USERNAME'],
     nickname: row[prefix + 'NICKNAME'],
+    profileImageUrl: row[prefix + 'PROFILE_IMAGE_URL'] || '',
   };
 }
 
@@ -49,9 +50,10 @@ function mapMessageRow(row) {
 async function findUserByUsername(connection, username) {
   const result = await connection.execute(
     `
-      SELECT USER_ID, USERNAME, NICKNAME
+      SELECT USER_ID, USERNAME, NICKNAME, PROFILE_IMAGE_URL
       FROM USERS
       WHERE USERNAME = :username
+        AND ROLE <> 'ADMIN'
     `,
     { username },
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -63,9 +65,10 @@ async function findUserByUsername(connection, username) {
 async function getUserById(connection, userId) {
   const result = await connection.execute(
     `
-      SELECT USER_ID, USERNAME, NICKNAME
+      SELECT USER_ID, USERNAME, NICKNAME, PROFILE_IMAGE_URL
       FROM USERS
       WHERE USER_ID = :userId
+        AND ROLE <> 'ADMIN'
     `,
     { userId },
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -184,12 +187,22 @@ router.get('/conversations', jwtAuthentication, async (req, res) => {
           other_user.USER_ID,
           other_user.USERNAME,
           other_user.NICKNAME,
+          other_user.PROFILE_IMAGE_URL,
           last_dm.MESSAGE_ID,
           last_dm.CONTENT,
           TO_CHAR(last_dm.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS CREATED_AT,
           last_dm.SENDER_ID,
           last_dm.RECEIVER_ID,
           last_dm.IS_READ,
+          CASE WHEN NOT EXISTS (
+            SELECT 1 FROM FOLLOWS relationship
+            WHERE (relationship.FOLLOWER_ID = :viewerId AND relationship.FOLLOWING_ID = other_user.USER_ID)
+               OR (relationship.FOLLOWER_ID = other_user.USER_ID AND relationship.FOLLOWING_ID = :viewerId)
+          ) AND EXISTS (
+            SELECT 1 FROM DM received_dm
+            WHERE received_dm.SENDER_ID = other_user.USER_ID
+              AND received_dm.RECEIVER_ID = :viewerId
+          ) THEN 1 ELSE 0 END AS IS_REQUEST,
           (
             SELECT COUNT(*)
             FROM DM unread_dm
@@ -205,6 +218,7 @@ router.get('/conversations', jwtAuthentication, async (req, res) => {
              OR (dm2.SENDER_ID = other_user.USER_ID AND dm2.RECEIVER_ID = :viewerId)
         )
         WHERE other_user.USER_ID <> :viewerId
+          AND other_user.ROLE <> 'ADMIN'
           AND NOT EXISTS (
             SELECT 1 FROM USER_BLOCK ub
             WHERE (ub.BLOCKER_ID = :viewerId AND ub.BLOCKED_ID = other_user.USER_ID)
@@ -227,6 +241,7 @@ router.get('/conversations', jwtAuthentication, async (req, res) => {
         createdAt: row.CREATED_AT,
       },
       unreadCount: row.UNREAD_COUNT || 0,
+      isRequest: row.IS_REQUEST === 1,
     }));
 
     return res.json({ result: 'success', conversations });
@@ -482,10 +497,11 @@ router.post('/:username/messages', jwtAuthentication, async (req, res) => {
 
     await connection.commit();
 
-    const senderUser = {
+    const senderUser = await getUserById(connection, req.user.userId) || {
       userId: req.user.userId,
       username: req.user.username,
       nickname: req.user.nickname || req.user.username,
+      profileImageUrl: '',
     };
     const message = mapMessageRow(messageResult.rows[0]);
     const receiverUnreadCount = await getUnreadDmCount(connection, targetUser.userId);

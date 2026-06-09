@@ -7,6 +7,7 @@ const router = express.Router();
 const TERM_LIMIT = 5;
 const USER_LIMIT = 8;
 const TAG_LIMIT = 8;
+const TRENDING_TAG_LIMIT = 4;
 
 function normalizeKeyword(value) {
   return String(value || '').trim().slice(0, 50);
@@ -86,7 +87,8 @@ router.get('/suggestions', jwtAuthentication, async (req, res) => {
         'FROM (',
         '  SELECT u.USER_ID, u.USERNAME, u.NICKNAME, u.DISCRIMINATOR',
         '  FROM USERS u',
-        '  WHERE LOWER(u.USERNAME) LIKE :likeText OR LOWER(u.NICKNAME) LIKE :likeText',
+        "  WHERE u.ROLE <> 'ADMIN'",
+        '    AND (LOWER(u.USERNAME) LIKE :likeText OR LOWER(u.NICKNAME) LIKE :likeText)',
         '  ORDER BY u.USER_ID DESC',
         ')',
         'WHERE ROWNUM <= :userLimit',
@@ -113,6 +115,43 @@ router.get('/suggestions', jwtAuthentication, async (req, res) => {
   } catch (error) {
     console.error('Search suggestion error', error);
     return res.status(500).json({ result: 'fail', message: '추천검색어를 불러오지 못했습니다.' });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+router.get('/tags/trending', jwtAuthentication, async (req, res) => {
+  let connection;
+
+  try {
+    connection = await db.getConnection();
+    const result = await connection.execute(
+      [
+        'SELECT TAG, USED_COUNT',
+        'FROM (',
+        '  SELECT pt.TAG, COUNT(DISTINCT pt.POST_ID) AS USED_COUNT',
+        '  FROM POST_TAG pt',
+        '  JOIN POSTS p ON p.POST_ID = pt.POST_ID AND p.IS_DELETED = 0',
+        '  WHERE p.PARENT_POST_ID IS NULL',
+        '  GROUP BY pt.TAG',
+        '  HAVING COUNT(DISTINCT pt.POST_ID) > 0',
+        '  ORDER BY USED_COUNT DESC, MAX(p.CREATED_AT) DESC, pt.TAG ASC',
+        ')',
+        'WHERE ROWNUM <= :limit',
+      ].join(' '),
+      { limit: TRENDING_TAG_LIMIT },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    const tags = result.rows.map((row) => ({
+      tag: row.TAG,
+      count: row.USED_COUNT || 0,
+    }));
+
+    return res.json({ result: 'success', tags });
+  } catch (error) {
+    console.error('Trending tag error', error);
+    return res.status(500).json({ result: 'fail', message: '인기 태그를 불러오지 못했습니다.' });
   } finally {
     if (connection) await connection.close();
   }

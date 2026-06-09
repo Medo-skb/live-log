@@ -14,11 +14,13 @@ import {
   Typography,
 } from '@mui/material';
 import CalendarMonthRoundedIcon from '@mui/icons-material/CalendarMonthRounded';
+import MailOutlineRoundedIcon from '@mui/icons-material/MailOutlineRounded';
 import CloseRoundedIcon from '@mui/icons-material/CloseRounded';
 import PhotoCameraRoundedIcon from '@mui/icons-material/PhotoCameraRounded';
 import PostFeedItem from '../post/PostFeedItem';
 import { getLikedPosts, getPosts } from '../../api/postApi';
 import { getUserProfile, toggleUserFollow, updateUserProfile } from '../../api/userApi';
+import { updateAuthUser } from '../../utils/authStorage';
 
 const PAGE_SIZE = 20;
 const NICKNAME_MIN = 2;
@@ -70,6 +72,7 @@ function Profile() {
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [followLoading, setFollowLoading] = useState(false);
+  const [followHover, setFollowHover] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editNickname, setEditNickname] = useState('');
   const [editBio, setEditBio] = useState('');
@@ -190,6 +193,11 @@ function Profile() {
     setActiveTab(nextTab);
   };
 
+  const handleOpenDirectMessage = () => {
+    if (!profile?.username || profile.isMe) return;
+    navigate('/chat?to=' + encodeURIComponent(profile.username));
+  };
+
   const handleOpenConnections = (type) => {
     navigate('/' + encodeURIComponent(username) + '/' + type);
   };
@@ -269,9 +277,11 @@ function Profile() {
           ...prevUser,
           nickname: nextProfile.nickname,
           profileImage: nextProfile.profileImageUrl,
+          profileImageUrl: nextProfile.profileImageUrl,
           bannerImage: nextProfile.bannerImageUrl,
+          bannerImageUrl: nextProfile.bannerImageUrl,
         };
-        localStorage.setItem('user', JSON.stringify(nextUser));
+        updateAuthUser(nextUser);
         return nextUser;
       });
       resetPreview();
@@ -306,16 +316,22 @@ function Profile() {
               <Avatar className="profile-hero__avatar" src={profileImageUrl}>{getInitial(profile)}</Avatar>
               <Box className="profile-hero__actions">
                 {profile.isMe ? (
-                  <Button className="profile-outline-button" onClick={handleOpenEdit}>프로필 수정</Button>
-                ) : (
-                  <Button
-                    className={profile.followedByMe ? 'profile-outline-button' : 'profile-follow-button'}
-                    disabled={followLoading}
-                    onClick={handleFollowToggle}
-                    variant={profile.followedByMe ? 'outlined' : 'contained'}
-                  >
-                    {profile.followedByMe ? '팔로잉' : '팔로우'}
-                  </Button>
+                  <Button className="profile-outline-button" onClick={handleOpenEdit}>프로필 수정</Button>                ) : (
+                  <>
+                    <IconButton className="profile-message-button" onClick={handleOpenDirectMessage} aria-label="쪽지 보내기">
+                      <MailOutlineRoundedIcon />
+                    </IconButton>
+                    <Button
+                      className={profile.followedByMe ? 'profile-outline-button profile-outline-button--following' : 'profile-follow-button'}
+                      disabled={followLoading}
+                      onClick={handleFollowToggle}
+                      onMouseEnter={() => setFollowHover(true)}
+                      onMouseLeave={() => setFollowHover(false)}
+                      variant={profile.followedByMe ? 'outlined' : 'contained'}
+                    >
+                      {profile.followedByMe ? (followHover ? '팔로잉 해제' : '팔로잉') : '팔로우'}
+                    </Button>
+                  </>
                 )}
               </Box>
 

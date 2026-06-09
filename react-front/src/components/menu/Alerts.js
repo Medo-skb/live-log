@@ -6,9 +6,11 @@ import PersonAddAltRoundedIcon from '@mui/icons-material/PersonAddAltRounded';
 import RepeatRoundedIcon from '@mui/icons-material/RepeatRounded';
 import ChatBubbleOutlineRoundedIcon from '@mui/icons-material/ChatBubbleOutlineRounded';
 import NotificationsNoneRoundedIcon from '@mui/icons-material/NotificationsNoneRounded';
+import FormatQuoteRoundedIcon from '@mui/icons-material/FormatQuoteRounded';
 import { getNotices, markAllNoticesRead, markNoticeRead } from '../../api/noticeApi';
 
 const PAGE_SIZE = 20;
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
 
 const copy = {
   title: '알림',
@@ -20,6 +22,11 @@ const copy = {
   unread: '안 읽음',
   read: '읽음',
 };
+
+function resolveMediaUrl(fileUrl) {
+  if (!fileUrl) return '';
+  return String(fileUrl).startsWith('http') ? fileUrl : API_BASE_URL + fileUrl;
+}
 
 function getInitial(notice) {
   return String(notice?.sender?.nickname || notice?.sender?.username || 'L').charAt(0).toUpperCase();
@@ -43,11 +50,12 @@ function formatRelativeTime(createdAt) {
 }
 
 function getNoticeMessage(notice) {
-  const senderName = notice.sender?.nickname || notice.sender?.username || '???';
+  const senderName = notice.sender?.nickname || notice.sender?.username || '알 수 없음';
   if (notice.type === 'FOLLOW') return senderName + '님이 나를 팔로우합니다.';
   if (notice.type === 'LIKE') return senderName + '님이 내 게시글을 좋아합니다.';
   if (notice.type === 'REPOST') return senderName + '님이 내 게시글을 리포스트했습니다.';
   if (notice.type === 'COMMENT') return senderName + '님이 내 게시글에 댓글을 남겼습니다.';
+  if (notice.type === 'QUOTE') return senderName + '님이 내 게시글을 인용했습니다.';
   return senderName + '님에게 새 알림이 있습니다.';
 }
 
@@ -56,7 +64,17 @@ function getNoticeIcon(type) {
   if (type === 'LIKE') return <FavoriteRoundedIcon />;
   if (type === 'REPOST') return <RepeatRoundedIcon />;
   if (type === 'COMMENT') return <ChatBubbleOutlineRoundedIcon />;
+  if (type === 'QUOTE') return <FormatQuoteRoundedIcon />;
   return <NotificationsNoneRoundedIcon />;
+}
+
+function mergeNoticeList(currentNotices, incomingNotices) {
+  const noticeMap = new Map();
+  [...currentNotices, ...incomingNotices].forEach((notice) => {
+    if (notice?.noticeId) noticeMap.set(notice.noticeId, notice);
+  });
+
+  return Array.from(noticeMap.values()).sort((a, b) => Number(b.noticeId) - Number(a.noticeId));
 }
 
 function Alerts() {
@@ -101,11 +119,7 @@ function Alerts() {
       const notice = payload.notice;
       if (!notice?.noticeId) return;
 
-      setNotices((prevNotices) => (
-        prevNotices.some((item) => item.noticeId === notice.noticeId)
-          ? prevNotices
-          : [notice, ...prevNotices]
-      ));
+      setNotices((prevNotices) => mergeNoticeList([notice], prevNotices));
 
       const nextUnreadCount = Number(payload.unreadCount);
       setUnreadCount((prevCount) => (
@@ -163,8 +177,7 @@ function Alerts() {
     try {
       const data = await getNotices({ cursor: nextCursor, limit: PAGE_SIZE });
       const nextNotices = Array.isArray(data.notices) ? data.notices : [];
-      const existingIds = new Set(notices.map((notice) => notice.noticeId));
-      setNotices((prevNotices) => [...prevNotices, ...nextNotices.filter((notice) => !existingIds.has(notice.noticeId))]);
+      setNotices((prevNotices) => mergeNoticeList(prevNotices, nextNotices));
       setUnreadCount(Number(data.unreadCount) || 0);
       setNextCursor(data.nextCursor || null);
       setHasMore(Boolean(data.hasMore));
@@ -205,7 +218,7 @@ function Alerts() {
               tabIndex={0}
             >
               <Box className="notice-card__icon">{getNoticeIcon(notice.type)}</Box>
-              <Avatar className="main-avatar notice-card__avatar">{getInitial(notice)}</Avatar>
+              <Avatar className="main-avatar notice-card__avatar" src={resolveMediaUrl(notice.sender?.profileImageUrl)}>{getInitial(notice)}</Avatar>
               <Box className="notice-card__body">
                 <Typography className="notice-card__message">{getNoticeMessage(notice)}</Typography>
                 <Typography className="notice-card__meta">{formatRelativeTime(notice.createdAt)} · {notice.isRead ? copy.read : copy.unread}</Typography>

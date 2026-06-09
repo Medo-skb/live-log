@@ -34,6 +34,7 @@ import {
 } from '../../api/postApi';
 import PostComposerDialog from '../post/PostComposerDialog';
 import { useAppModal } from '../common/ModalProvider';
+import { getTagSearchPath, getVisibleTags } from '../../utils/tagDisplay';
 
 const COMMENT_LIMIT = 20;
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
@@ -154,7 +155,7 @@ function QuotePostCard({ onOpen, post }) {
       tabIndex={0}
     >
       <Box className="main-quote-preview-card__author">
-        <Avatar className="main-avatar main-avatar--quote">{post.user.nickname.charAt(0)}</Avatar>
+        <Avatar className="main-avatar main-avatar--quote" src={resolveMediaUrl(post.user.profileImageUrl || post.user.profileImage)}>{post.user.nickname.charAt(0)}</Avatar>
         <Box className="main-quote-preview-card__author-text">
           <Typography className="main-quote-preview-card__name">{post.user.nickname}</Typography>
           <Typography className="main-post__meta">@{formatUsername(post.user.username)} · {formatRelativeTime(post.createdAt)}</Typography>
@@ -166,6 +167,15 @@ function QuotePostCard({ onOpen, post }) {
         <Chip className="main-work-chip" label={post.progress} size="small" />
       </Stack>
       <Typography className="main-quote-preview-card__content">{post.content}</Typography>
+      {post.media?.length > 0 && (
+        <Box className="main-quote-preview-card__media">
+          {post.media.map((media) => (
+            media.mediaType === 'VIDEO'
+              ? <video controls key={media.mediaId} src={resolveMediaUrl(media.fileUrl)} />
+              : <img alt="quoted post media" key={media.mediaId} src={resolveMediaUrl(media.fileUrl)} />
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -188,11 +198,13 @@ function PostDetail() {
   const [postMenuAnchorEl, setPostMenuAnchorEl] = useState(null);
   const [repostMenuAnchorEl, setRepostMenuAnchorEl] = useState(null);
   const [quoteDialogOpen, setQuoteDialogOpen] = useState(false);
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
   const [error, setError] = useState('');
 
   const isPostMenuOpen = Boolean(postMenuAnchorEl);
   const isPostMenuMine = isMyPost(post, user);
   const isRepostMenuOpen = Boolean(repostMenuAnchorEl);
+  const spoilerHidden = Boolean(post?.isSpoiler && !isPostMenuMine && !spoilerRevealed);
 
   useEffect(() => {
     let ignore = false;
@@ -425,9 +437,9 @@ function PostDetail() {
         <Box className="main-feed-state"><Typography>게시글을 찾을 수 없습니다.</Typography></Box>
       ) : (
         <>
-          <Box className="post-detail-card">
+          <Box className={spoilerHidden ? 'post-detail-card post-detail-card--spoiler-hidden' : 'post-detail-card'}>
             <Box className="post-detail-author-row">
-              <Avatar className="main-avatar">{post.user.nickname.charAt(0)}</Avatar>
+              <Avatar className="main-avatar" src={resolveMediaUrl(post.user.profileImageUrl || post.user.profileImage)}>{post.user.nickname.charAt(0)}</Avatar>
               <Box className="post-detail-author-row__text">
                 <Typography className="post-detail-author__name">{post.user.nickname}</Typography>
                 <Typography className="main-post__meta">@{formatUsername(post.user.username)}</Typography>
@@ -436,6 +448,14 @@ function PostDetail() {
                 <MoreHorizRoundedIcon />
               </IconButton>
             </Box>
+
+            {spoilerHidden && (
+              <Box className="main-spoiler-gate">
+                <Typography className="main-spoiler-gate__title">스포일러가 포함된 글입니다.</Typography>
+                <Typography className="main-spoiler-gate__message">태그, 이미지, 인용글에 스포일러가 포함될 수 있습니다.</Typography>
+                <Button className="main-spoiler-gate__button" onClick={() => setSpoilerRevealed(true)}>게시글 보기</Button>
+              </Box>
+            )}
 
             <Stack className="main-work-chip-row" direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
               <Chip className="main-work-chip" label={post.categoryName} size="small" />
@@ -463,9 +483,9 @@ function PostDetail() {
 
             {post.quotePost && <QuotePostCard onOpen={handleOpenQuotePost} post={post.quotePost} />}
 
-            {post.tags.length > 0 && (
+            {getVisibleTags(post).length > 0 && (
               <Stack className="main-tag-row" direction="row" spacing={0.75}>
-                {post.tags.map((tag) => <span className="main-tag" key={tag}>#{tag}</span>)}
+                {getVisibleTags(post).map((tag) => <button className="main-tag main-tag--button" key={tag} onClick={() => navigate(getTagSearchPath(tag))} type="button">#{tag}</button>)}
               </Stack>
             )}
 

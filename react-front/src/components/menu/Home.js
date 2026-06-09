@@ -17,7 +17,6 @@ import {
   TextField,
   Typography,
 } from '@mui/material';
-import AutoAwesomeRoundedIcon from '@mui/icons-material/AutoAwesomeRounded';
 import EditRoundedIcon from '@mui/icons-material/EditRounded';
 import BookmarkBorderRoundedIcon from '@mui/icons-material/BookmarkBorderRounded';
 import BookmarkRoundedIcon from '@mui/icons-material/BookmarkRounded';
@@ -45,16 +44,10 @@ import MediaPreviewList from '../post/MediaPreviewList';
 import PostComposerDialog from '../post/PostComposerDialog';
 import { useAppModal } from '../common/ModalProvider';
 import { CATEGORY_ALL, CATEGORY_ALL_ID, DEFAULT_CATEGORIES } from '../../constants/categories';
+import { getTagSearchPath, getVisibleTags } from '../../utils/tagDisplay';
 
 const PAGE_SIZE = 20;
 const NEW_POST_POLL_MS = 30000;
-const SPOILER_STATUS = {
-  IDLE: 'IDLE',
-  ANALYZING: 'ANALYZING',
-  SAFE: 'SAFE',
-  SPOILER: 'SPOILER',
-};
-
 const copy = {
   category: '카테고리',
   spoiler: '스포일러',
@@ -71,10 +64,6 @@ const copy = {
   commentSubmit: '댓글',
   commentSubmitting: '등록 중',
   commentEmpty: '아직 댓글이 없습니다.',
-  aiIdle: 'AI 분석',
-  aiAnalyzing: '분석 중',
-  aiSafe: '안전',
-  aiSpoiler: '스포일러 감지',
   empty: '아직 등록된 로그가 없습니다.',
   loadError: '게시글을 불러오지 못했습니다.',
   loadingMore: '이전 로그를 불러오는 중...',
@@ -109,11 +98,12 @@ function resolveMediaUrl(fileUrl) {
   return fileUrl.startsWith('http') ? fileUrl : API_BASE_URL + fileUrl;
 }
 
-function getSpoilerStatusLabel(status) {
-  if (status === SPOILER_STATUS.ANALYZING) return copy.aiAnalyzing;
-  if (status === SPOILER_STATUS.SAFE) return copy.aiSafe;
-  if (status === SPOILER_STATUS.SPOILER) return copy.aiSpoiler;
-  return copy.aiIdle;
+function parseManualTags(value) {
+  return [...new Set(String(value || '')
+    .split(/[\s,]+/)
+    .map((tag) => tag.replace(/^#/, '').trim())
+    .filter(Boolean))]
+    .slice(0, 5);
 }
 
 function isPostVisibleByCategory(post, activeCategoryId) {
@@ -221,7 +211,7 @@ function QuotePostCard({ post }) {
   return (
     <Box className="main-quote-preview-card main-quote-preview-card--embedded">
       <Box className="main-quote-preview-card__author">
-        <Avatar className="main-avatar main-avatar--quote">{post.user.nickname.charAt(0)}</Avatar>
+        <Avatar className="main-avatar main-avatar--quote" src={resolveMediaUrl(post.user.profileImageUrl || post.user.profileImage)}>{post.user.nickname.charAt(0)}</Avatar>
         <Box className="main-quote-preview-card__author-text">
           <Typography className="main-quote-preview-card__name">{post.user.nickname}</Typography>
           <Typography className="main-post__meta">@{formatPostUsername(post.user.username)} · {formatRelativeTime(post.createdAt)}</Typography>
@@ -233,6 +223,15 @@ function QuotePostCard({ post }) {
         <Chip className="main-work-chip" label={post.progress} size="small" />
       </Stack>
       <Typography className="main-quote-preview-card__content">{post.content}</Typography>
+      {post.media?.length > 0 && (
+        <Box className="main-quote-preview-card__media">
+          {post.media.map((media) => (
+            media.mediaType === 'VIDEO'
+              ? <video controls key={media.mediaId} src={resolveMediaUrl(media.fileUrl)} />
+              : <img alt="quoted post media" key={media.mediaId} src={resolveMediaUrl(media.fileUrl)} />
+          ))}
+        </Box>
+      )}
     </Box>
   );
 }
@@ -244,10 +243,11 @@ function Home() {
   const { avatarSrc, displayName, isDarkMode, user } = useOutletContext();
   const [activeCategoryId, setActiveCategoryId] = useState(CATEGORY_ALL_ID);
   const [content, setContent] = useState('');
+  const [tagInputOpen, setTagInputOpen] = useState(false);
+  const [tagInput, setTagInput] = useState('');
   const [workTitle, setWorkTitle] = useState('');
   const [progress, setProgress] = useState('');
   const [categoryId, setCategoryId] = useState('');
-  const [spoilerStatus, setSpoilerStatus] = useState(SPOILER_STATUS.IDLE);
   const [posts, setPosts] = useState([]);
   const [nextCursor, setNextCursor] = useState(null);
   const [hasMore, setHasMore] = useState(false);
@@ -269,6 +269,7 @@ function Home() {
   const [repostMenuAnchorEl, setRepostMenuAnchorEl] = useState(null);
   const [repostMenuPost, setRepostMenuPost] = useState(null);
   const [quoteDialogPost, setQuoteDialogPost] = useState(null);
+  const [revealedSpoilerPosts, setRevealedSpoilerPosts] = useState({});
   const mediaInputRef = useRef(null);
   const loadMoreTargetRef = useRef(null);
   const loadMoreRef = useRef(null);
@@ -281,10 +282,14 @@ function Home() {
     : DEFAULT_CATEGORIES;
   const feedCategoryItems = [CATEGORY_ALL, ...userCategories];
   const selectedCategoryId = activeCategoryId === CATEGORY_ALL_ID ? undefined : activeCategoryId;
-  const isSubmitDisabled = !categoryId || !workTitle.trim() || !progress.trim() || !content.trim() || spoilerStatus === SPOILER_STATUS.ANALYZING || submitLoading;
+  const isSubmitDisabled = !categoryId || !workTitle.trim() || !progress.trim() || !content.trim() || submitLoading;
   const isPostMenuOpen = Boolean(postMenuAnchorEl);
   const isPostMenuMine = isMyPost(postMenuPost, user);
   const isRepostMenuOpen = Boolean(repostMenuAnchorEl);
+  const handleRevealSpoiler = (event, postId) => {
+    event.stopPropagation();
+    setRevealedSpoilerPosts((prev) => ({ ...prev, [postId]: true }));
+  };
 
   useEffect(() => {
     postsRef.current = posts;
@@ -414,7 +419,8 @@ function Home() {
     setWorkTitle('');
     setProgress('');
     setContent('');
-    setSpoilerStatus(SPOILER_STATUS.IDLE);
+    setTagInput('');
+    setTagInputOpen(false);
     setSelectedMediaFiles([]);
     setEditingPostId(null);
     if (mediaInputRef.current) mediaInputRef.current.value = '';
@@ -422,7 +428,11 @@ function Home() {
 
   const handleContentChange = (event) => {
     setContent(event.target.value);
-    setSpoilerStatus(SPOILER_STATUS.IDLE);
+  };
+
+  const handleOpenProfile = (event, postUser) => {
+    event.stopPropagation();
+    if (postUser?.username) navigate('/' + encodeURIComponent(postUser.username));
   };
 
   const handleOpenPostDetail = (post) => {
@@ -432,17 +442,6 @@ function Home() {
   const handleOpenPostPhoto = (event, post, photoIndex) => {
     event.stopPropagation();
     navigate(getPostPhotoPath(post, photoIndex));
-  };
-
-  const handleAnalyzeSpoiler = () => {
-    if (!content.trim()) return;
-
-    setSpoilerStatus(SPOILER_STATUS.ANALYZING);
-
-    window.setTimeout(() => {
-      const spoilerKeywords = ['죽', '사망', '범인', '결말', '반전', '스포'];
-      setSpoilerStatus(spoilerKeywords.some((keyword) => content.includes(keyword)) ? SPOILER_STATUS.SPOILER : SPOILER_STATUS.SAFE);
-    }, 500);
   };
 
   const handlePostMenuOpen = (event, post) => {
@@ -463,7 +462,8 @@ function Home() {
     setWorkTitle(postMenuPost.workTitle || '');
     setProgress(postMenuPost.progress || '');
     setContent(postMenuPost.content || '');
-    setSpoilerStatus(postMenuPost.isSpoiler ? SPOILER_STATUS.SPOILER : SPOILER_STATUS.IDLE);
+    setTagInput((postMenuPost.tags || []).map((tag) => '#' + tag).join(' '));
+    setTagInputOpen(Boolean((postMenuPost.tags || []).length));
     setSelectedMediaFiles([]);
     if (mediaInputRef.current) mediaInputRef.current.value = '';
     handlePostMenuClose();
@@ -770,7 +770,7 @@ function Home() {
         workTitle: workTitle.trim(),
         progress: progress.trim(),
         content: content.trim(),
-        isSpoiler: spoilerStatus === SPOILER_STATUS.SPOILER,
+        tags: parseManualTags(tagInput),
       };
       const data = editingPostId
         ? await updatePost({ postId: editingPostId, ...payload })
@@ -858,25 +858,24 @@ function Home() {
                 ref={mediaInputRef}
                 type="file"
               />
-              <Button className="main-tool-text-button" startIcon={<TagRoundedIcon />}>
+              <Button className="main-tool-text-button" onClick={() => setTagInputOpen((prev) => !prev)} startIcon={<TagRoundedIcon />}>
                 {copy.tagButton}
-              </Button>
-              <Button
-                className={spoilerStatus === SPOILER_STATUS.SPOILER ? 'main-ai-button main-ai-button--danger' : 'main-ai-button'}
-                disabled={!content.trim() || spoilerStatus === SPOILER_STATUS.ANALYZING}
-                onClick={handleAnalyzeSpoiler}
-                startIcon={<AutoAwesomeRoundedIcon />}
-              >
-                {getSpoilerStatusLabel(spoilerStatus)}
               </Button>
             </Stack>
             <Stack alignItems="center" className="main-composer__post-actions" direction="row" spacing={1.4}>
-              {spoilerStatus === SPOILER_STATUS.SPOILER && <Chip className="main-spoiler-chip" icon={<VisibilityOffRoundedIcon />} label={copy.spoiler} size="small" />}
               <Button className="main-submit-button main-submit-button--post" disabled={isSubmitDisabled} onClick={handleSubmit} size="large" variant="contained">
                 {submitLoading ? copy.submitting : editingPostId ? copy.updateSubmit : copy.submit}
               </Button>
-            </Stack>
-          </Box>
+            </Stack>          </Box>
+          {tagInputOpen && (
+            <TextField
+              className="main-tag-input"
+              fullWidth
+              onChange={(event) => setTagInput(event.target.value)}
+              placeholder="태그를 직접 입력하세요. 예: #결말 #엔딩게임"
+              value={tagInput}
+            />
+          )}
           <MediaPreviewList files={selectedMediaFiles} onRemove={handleRemoveMediaFile} />
           {error && <Alert severity="error" className="main-form-alert">{error}</Alert>}
         </Box>
@@ -897,18 +896,29 @@ function Home() {
       ) : (
         <>
           <Stack className="main-post-list">
-            {posts.map((post) => (
+            {posts.map((post) => {
+              const spoilerHidden = Boolean(post.isSpoiler && !isMyPost(post, user) && !revealedSpoilerPosts[post.postId]);
+
+              return (
               <Box component="article" className="main-post main-post--clickable" key={getTimelineKey(post)} onClick={() => handleOpenPostDetail(post)} onKeyDown={(event) => { if (event.key === 'Enter') handleOpenPostDetail(post); }} role="button" tabIndex={0}>
-                <Avatar className="main-avatar">{post.user.nickname.charAt(0)}</Avatar>
-                <Box className="main-post__body">
+                <Avatar className="main-avatar main-post__profile-link" onClick={(event) => handleOpenProfile(event, post.user)} src={resolveMediaUrl(post.user.profileImageUrl || post.user.profileImage)}>{post.user.nickname.charAt(0)}</Avatar>
+                <Box className={spoilerHidden ? 'main-post__body main-post__body--spoiler-hidden' : 'main-post__body'}>
                   {post.repostedBy && <Typography className="main-repost-label"><RepeatRoundedIcon /> {getRepostLabel(post, user)}</Typography>}
                   <Box className="main-post__topline">
                     <Box className="main-post__author-line">
-                      <Typography className="main-post__name">{post.user.nickname}</Typography>
+                      <Typography className="main-post__name main-post__profile-link" onClick={(event) => handleOpenProfile(event, post.user)}>{post.user.nickname}</Typography>
                       <Typography className="main-post__meta">@{formatPostUsername(post.user.username)} · {formatRelativeTime(post.createdAt)}</Typography>
                     </Box>
                     <IconButton aria-label="more" className="main-icon-button main-icon-button--small" onClick={(event) => { event.stopPropagation(); handlePostMenuOpen(event, post); }}><MoreHorizRoundedIcon /></IconButton>
                   </Box>
+
+                  {spoilerHidden && (
+                    <Box className="main-spoiler-gate" onClick={(event) => event.stopPropagation()}>
+                      <Typography className="main-spoiler-gate__title">스포일러가 포함된 글입니다.</Typography>
+                      <Typography className="main-spoiler-gate__message">태그, 이미지, 인용글에 스포일러가 포함될 수 있습니다.</Typography>
+                      <Button className="main-spoiler-gate__button" onClick={(event) => handleRevealSpoiler(event, post.postId)}>게시글 보기</Button>
+                    </Box>
+                  )}
 
                   <Box className="main-work-chip-row">
                     <Chip className="main-work-chip" label={post.categoryName} size="small" />
@@ -936,9 +946,9 @@ function Home() {
 
                   {post.quotePost && <QuotePostCard post={post.quotePost} />}
 
-                  {post.tags.length > 0 && (
+                  {getVisibleTags(post).length > 0 && (
                     <Stack className="main-tag-row" direction="row" spacing={0.75}>
-                      {post.tags.map((tag) => <span className="main-tag" key={tag}>#{tag}</span>)}
+                      {getVisibleTags(post).map((tag) => <button className="main-tag main-tag--button" key={tag} onClick={(event) => { event.stopPropagation(); navigate(getTagSearchPath(tag)); }} type="button">#{tag}</button>)}
                     </Stack>
                   )}
 
@@ -1017,7 +1027,8 @@ function Home() {
                   )}
                 </Box>
               </Box>
-            ))}
+              );
+            })}
           </Stack>
 
           <Popover

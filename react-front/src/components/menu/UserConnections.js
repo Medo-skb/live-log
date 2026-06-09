@@ -10,15 +10,24 @@ import {
   Typography,
 } from '@mui/material';
 import ArrowBackRoundedIcon from '@mui/icons-material/ArrowBackRounded';
-import { getUserConnections } from '../../api/userApi';
+import { getUserConnections, toggleUserFollow } from '../../api/userApi';
+
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
 
 const copy = {
   followers: '팔로워',
   following: '팔로잉',
+  follow: '팔로우',
+  unfollow: '팔로잉 해제',
   emptyFollowers: '아직 팔로워가 없습니다.',
   emptyFollowing: '아직 팔로잉한 사용자가 없습니다.',
   loadError: '사용자 목록을 불러오지 못했습니다.',
 };
+
+function resolveMediaUrl(fileUrl) {
+  if (!fileUrl) return '';
+  return String(fileUrl).startsWith('http') ? fileUrl : API_BASE_URL + fileUrl;
+}
 
 function getInitial(user) {
   return String(user?.nickname || user?.username || 'L').charAt(0).toUpperCase();
@@ -32,6 +41,8 @@ function UserConnections() {
   const title = isFollowers ? copy.followers : copy.following;
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [followLoadingUser, setFollowLoadingUser] = useState('');
+  const [hoveredUser, setHoveredUser] = useState('');
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -62,6 +73,27 @@ function UserConnections() {
     navigate('/' + encodeURIComponent(targetUser.username));
   };
 
+  const handleToggleFollow = async (event, targetUser) => {
+    event.stopPropagation();
+    if (followLoadingUser) return;
+
+    setFollowLoadingUser(targetUser.username);
+    try {
+      const data = await toggleUserFollow({ username: targetUser.username });
+      if (!data.following && !isFollowers) {
+        setUsers((prevUsers) => prevUsers.filter((item) => item.username !== targetUser.username));
+        return;
+      }
+      setUsers((prevUsers) => prevUsers.map((item) => (
+        item.username === targetUser.username ? { ...item, followedByMe: Boolean(data.following) } : item
+      )));
+    } catch (requestError) {
+      setError(requestError.message || '팔로우 처리 중 오류가 발생했습니다.');
+    } finally {
+      setFollowLoadingUser('');
+    }
+  };
+
   return (
     <Box component="main" className="main-feed connection-page">
       <Box className="connection-header">
@@ -80,23 +112,37 @@ function UserConnections() {
         <Box className="main-feed-state"><Typography>{isFollowers ? copy.emptyFollowers : copy.emptyFollowing}</Typography></Box>
       ) : (
         <Stack className="connection-list">
-          {users.map((targetUser) => (
-            <Box
-              className="connection-card main-post--clickable"
-              key={targetUser.userId}
-              onClick={() => handleOpenProfile(targetUser)}
-              onKeyDown={(event) => { if (event.key === 'Enter') handleOpenProfile(targetUser); }}
-              role="button"
-              tabIndex={0}
-            >
-              <Avatar className="main-avatar">{getInitial(targetUser)}</Avatar>
-              <Box className="connection-card__body">
-                <Typography className="connection-card__name">{targetUser.nickname}</Typography>
-                <Typography className="connection-card__username">@{targetUser.username}</Typography>
+          {users.map((targetUser) => {
+            const followed = Boolean(targetUser.followedByMe);
+            const hoveringFollowed = followed && hoveredUser === targetUser.username;
+
+            return (
+              <Box
+                className="connection-card main-post--clickable"
+                key={targetUser.userId}
+                onClick={() => handleOpenProfile(targetUser)}
+                onKeyDown={(event) => { if (event.key === 'Enter') handleOpenProfile(targetUser); }}
+                role="button"
+                tabIndex={0}
+              >
+                <Avatar className="main-avatar" src={resolveMediaUrl(targetUser.profileImageUrl)}>{getInitial(targetUser)}</Avatar>
+                <Box className="connection-card__body">
+                  <Typography className="connection-card__name">{targetUser.nickname}</Typography>
+                  <Typography className="connection-card__username">@{targetUser.username}</Typography>
+                </Box>
+                <Button
+                  className={followed ? 'connection-follow-button connection-follow-button--following' : 'connection-follow-button'}
+                  disabled={followLoadingUser === targetUser.username}
+                  onClick={(event) => handleToggleFollow(event, targetUser)}
+                  onMouseEnter={() => setHoveredUser(targetUser.username)}
+                  onMouseLeave={() => setHoveredUser('')}
+                  variant={followed ? 'outlined' : 'contained'}
+                >
+                  {hoveringFollowed ? copy.unfollow : followed ? copy.following : copy.follow}
+                </Button>
               </Box>
-              {targetUser.followedByMe && <Typography className="connection-card__badge">{copy.following}</Typography>}
-            </Box>
-          ))}
+            );
+          })}
         </Stack>
       )}
     </Box>

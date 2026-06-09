@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
-import { useNavigate, useOutletContext } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Alert, Box, Button, Chip, CircularProgress, Stack, Typography } from '@mui/material';
 import AdminPanelSettingsRoundedIcon from '@mui/icons-material/AdminPanelSettingsRounded';
 import ReportProblemRoundedIcon from '@mui/icons-material/ReportProblemRounded';
 import { getReports, updateReport } from '../../api/adminApi';
 import { useAppModal } from '../common/ModalProvider';
+import { getAuthUser } from '../../utils/authStorage';
 
 const PAGE_SIZE = 20;
 
@@ -14,13 +15,15 @@ function getPostDetailPath(report) {
 }
 
 function getStatusLabel(status) {
-  return status === 'PROCESSED' ? '처리 완료' : '대기 중';
+  if (status === 'APPROVED') return '조치 완료';
+  if (status === 'REJECTED') return '신고 반려';
+  return '대기 중';
 }
 
 function Admin() {
   const navigate = useNavigate();
   const appModal = useAppModal();
-  const { user } = useOutletContext();
+  const user = getAuthUser();
   const [reports, setReports] = useState([]);
   const [status, setStatus] = useState('PENDING');
   const [nextCursor, setNextCursor] = useState(null);
@@ -70,7 +73,7 @@ function Admin() {
     setError('');
 
     try {
-      await updateReport({ reportId: report.reportId, status: 'PROCESSED', hidePost });
+      await updateReport({ reportId: report.reportId, status: hidePost ? 'APPROVED' : 'REJECTED', hidePost });
       setReports((prevReports) => prevReports.filter((item) => item.reportId !== report.reportId));
       await appModal.showAlert({ title: '처리 완료', message: '신고 처리가 완료되었습니다.' });
     } catch (requestError) {
@@ -82,14 +85,14 @@ function Admin() {
 
   if (String(user?.role || '').toUpperCase() !== 'ADMIN') {
     return (
-      <Box component="main" className="main-feed admin-page">
+      <Box component="main" className="admin-page admin-page--standalone">
         <Box className="main-feed-state"><Typography>관리자 권한이 없습니다.</Typography></Box>
       </Box>
     );
   }
 
   return (
-    <Box component="main" className="main-feed admin-page">
+    <Box component="main" className="admin-page admin-page--standalone">
       <Box className="menu-page-header menu-page-header--row">
         <Box>
           <Typography className="menu-page-header__title"><AdminPanelSettingsRoundedIcon /> 관리자</Typography>
@@ -99,7 +102,8 @@ function Admin() {
 
       <Stack className="admin-filter-row" direction="row" spacing={1}>
         <Button className={status === 'PENDING' ? 'admin-filter-button admin-filter-button--active' : 'admin-filter-button'} onClick={() => setStatus('PENDING')}>대기 중</Button>
-        <Button className={status === 'PROCESSED' ? 'admin-filter-button admin-filter-button--active' : 'admin-filter-button'} onClick={() => setStatus('PROCESSED')}>처리 완료</Button>
+        <Button className={status === 'APPROVED' ? 'admin-filter-button admin-filter-button--active' : 'admin-filter-button'} onClick={() => setStatus('APPROVED')}>조치 완료</Button>
+        <Button className={status === 'REJECTED' ? 'admin-filter-button admin-filter-button--active' : 'admin-filter-button'} onClick={() => setStatus('REJECTED')}>신고 반려</Button>
       </Stack>
 
       {error && <Alert className="main-form-alert" severity="error">{error}</Alert>}
@@ -116,7 +120,7 @@ function Admin() {
                 <Box className="admin-report-card__title-row">
                   <ReportProblemRoundedIcon />
                   <Typography className="admin-report-card__title">신고 #{report.reportId}</Typography>
-                  <Chip className={report.status === 'PROCESSED' ? 'admin-status-chip admin-status-chip--done' : 'admin-status-chip'} label={getStatusLabel(report.status)} size="small" />
+                  <Chip className={report.status !== 'PENDING' ? 'admin-status-chip admin-status-chip--done' : 'admin-status-chip'} label={getStatusLabel(report.status)} size="small" />
                 </Box>
                 <Typography className="admin-report-card__date">{report.createdAt}</Typography>
               </Box>
@@ -141,9 +145,9 @@ function Admin() {
                 <Typography className="admin-report-card__content">{report.post.content}</Typography>
               </Box>
 
-              {report.status !== 'PROCESSED' && (
+              {report.status === 'PENDING' && (
                 <Stack className="admin-report-card__actions" direction="row" spacing={1}>
-                  <Button className="profile-outline-button" disabled={processingId === report.reportId} onClick={() => handleProcessReport(report, false)}>확인 완료</Button>
+                  <Button className="profile-outline-button" disabled={processingId === report.reportId} onClick={() => handleProcessReport(report, false)}>신고 반려</Button>
                   <Button className="admin-danger-button" disabled={processingId === report.reportId || report.post.isDeleted} onClick={() => handleProcessReport(report, true)}>게시글 숨김</Button>
                 </Stack>
               )}

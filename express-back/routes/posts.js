@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const multer = require('multer');
@@ -6,6 +6,7 @@ const oracledb = require('oracledb');
 const db = require('../db');
 const jwtAuthentication = require('../auth');
 const { emitNoticeCreated } = require('../services/noticeSocket');
+const { analyzePostContent } = require('../services/aiAnalysis');
 
 const router = express.Router();
 const MAX_TAG_COUNT = 10;
@@ -165,11 +166,65 @@ function extractTags(content, rawTags) {
   return [...tagSet].slice(0, MAX_TAG_COUNT);
 }
 
+function mergeTags(...tagGroups) {
+  const tagSet = new Map();
+
+  tagGroups.flat().forEach((tag) => {
+    const cleanTag = String(tag || '').replace(/^#/, '').trim().slice(0, 100);
+    const key = cleanTag.toLowerCase();
+    if (cleanTag && !tagSet.has(key)) tagSet.set(key, cleanTag);
+  });
+
+  return [...tagSet.values()].slice(0, MAX_TAG_COUNT);
+}
+
+async function saveAiAnalysisLog(connection, postId, analysis) {
+  if (!connection || !postId || !analysis) return;
+
+  try {
+    await connection.execute(
+      `
+        INSERT INTO AI_ANALYSIS_LOG (
+          POST_ID,
+          IS_SPOILER,
+          CONFIDENCE,
+          RECOMMENDED_TAGS,
+          MODEL_NAME
+        ) VALUES (
+          :postId,
+          :isSpoiler,
+          :confidence,
+          :recommendedTags,
+          :modelName
+        )
+      `,
+      {
+        postId,
+        isSpoiler: analysis.isSpoiler ? 1 : 0,
+        confidence: Number(analysis.confidence) || 0,
+        recommendedTags: mergeTags(analysis.tags).join(',').slice(0, 500),
+        modelName: String((analysis.provider || 'ai') + ':' + (analysis.model || 'unknown')).slice(0, 100),
+      }
+    );
+  } catch (error) {
+    console.error('AI analysis log save error', error);
+  }
+}
+
 function detectSpoiler(content, isSpoiler) {
   if (Number(isSpoiler) === 1 || isSpoiler === true) return 1;
 
   const spoilerKeywords = ['죽', '사망', '범인', '결말', '반전', '스포'];
   return spoilerKeywords.some((keyword) => String(content || '').includes(keyword)) ? 1 : 0;
+}
+
+function parseMediaFiles(value) {
+  return value
+    ? value.split('|').filter(Boolean).map((item) => {
+      const [mediaId, mediaType, ...urlParts] = item.split(':');
+      return { mediaId: Number(mediaId), mediaType, fileUrl: urlParts.join(':') };
+    })
+    : [];
 }
 
 function mapPostRow(row) {
@@ -188,18 +243,10 @@ function mapPostRow(row) {
       username: row.USERNAME,
       nickname: row.NICKNAME,
       tag: row.DISCRIMINATOR,
+      profileImageUrl: row.PROFILE_IMAGE_URL || '',
     },
     tags: row.TAGS ? row.TAGS.split(',').filter(Boolean) : [],
-    media: row.MEDIA_FILES
-      ? row.MEDIA_FILES.split('|').filter(Boolean).map((item) => {
-        const [mediaId, mediaType, ...urlParts] = item.split(':');
-        return {
-          mediaId: Number(mediaId),
-          mediaType,
-          fileUrl: urlParts.join(':'),
-        };
-      })
-      : [],
+    media: parseMediaFiles(row.MEDIA_FILES),
     counts: {
       comments: row.COMMENT_COUNT || 0,
       reposts: row.REPOST_COUNT || 0,
@@ -228,7 +275,9 @@ function mapPostRow(row) {
         userId: row.QUOTE_USER_ID,
         username: row.QUOTE_USERNAME,
         nickname: row.QUOTE_NICKNAME,
+        profileImageUrl: row.QUOTE_PROFILE_IMAGE_URL || '',
       },
+      media: parseMediaFiles(row.QUOTE_MEDIA_FILES),
     } : null,
   };
 }
@@ -242,6 +291,7 @@ function getPostSelectSql(whereClause) {
         u.USERNAME,
         u.NICKNAME,
         u.DISCRIMINATOR,
+        u.PROFILE_IMAGE_URL,
         c.CATEGORY_ID,
         c.NAME AS CATEGORY_NAME,
         w.TITLE AS WORK_TITLE,
@@ -252,12 +302,14 @@ function getPostSelectSql(whereClause) {
         qp.USER_ID AS QUOTE_USER_ID,
         qu.USERNAME AS QUOTE_USERNAME,
         qu.NICKNAME AS QUOTE_NICKNAME,
+        qu.PROFILE_IMAGE_URL AS QUOTE_PROFILE_IMAGE_URL,
         qc.CATEGORY_ID AS QUOTE_CATEGORY_ID,
         qc.NAME AS QUOTE_CATEGORY_NAME,
         qw.TITLE AS QUOTE_WORK_TITLE,
         qp.PROGRESS AS QUOTE_PROGRESS,
         qp.CONTENT AS QUOTE_CONTENT,
         TO_CHAR(qp.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS QUOTE_CREATED_AT,
+        (SELECT LISTAGG(qpm.MEDIA_ID || ':' || qpm.MEDIA_TYPE || ':' || qpm.FILE_PATH, '|') WITHIN GROUP (ORDER BY qpm.ORDER_IDX) FROM POST_MEDIA qpm WHERE qpm.POST_ID = qp.POST_ID) AS QUOTE_MEDIA_FILES,
         TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS CREATED_AT,
         'post-' || p.POST_ID AS TIMELINE_ID,
         TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS TIMELINE_AT,
@@ -321,18 +373,28 @@ function buildPostFilters({ categoryId, cursor, afterPostId, username, search, v
   }
 
   if (search) {
-    filters.push(`(
-      LOWER(w.TITLE) LIKE :searchText
-      OR LOWER(w.ALIAS) LIKE :searchText
-      OR LOWER(u.USERNAME) LIKE :searchText
-      OR LOWER(u.NICKNAME) LIKE :searchText
-      OR LOWER(p.CONTENT) LIKE :searchText
-      OR EXISTS (
+    const normalizedSearch = search.toLowerCase();
+
+    if (normalizedSearch.startsWith('#')) {
+      filters.push(`EXISTS (
         SELECT 1 FROM POST_TAG pt
-        WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) LIKE :searchText
-      )
-    )`);
-    binds.searchText = '%' + search.toLowerCase() + '%';
+        WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) = :tagSearch
+      )`);
+      binds.tagSearch = normalizedSearch.replace(/^#/, '').trim();
+    } else {
+      filters.push(`(
+        LOWER(w.TITLE) LIKE :searchText
+        OR LOWER(w.ALIAS) LIKE :searchText
+        OR LOWER(u.USERNAME) LIKE :searchText
+        OR LOWER(u.NICKNAME) LIKE :searchText
+        OR LOWER(p.CONTENT) LIKE :searchText
+        OR EXISTS (
+          SELECT 1 FROM POST_TAG pt
+          WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) LIKE :searchText
+        )
+      )`);
+      binds.searchText = '%' + normalizedSearch + '%';
+    }
   }
 
   if (afterPostId) {
@@ -369,6 +431,7 @@ function getRepostSelectSql(whereClause) {
         u.USERNAME,
         u.NICKNAME,
         u.DISCRIMINATOR,
+        u.PROFILE_IMAGE_URL,
         c.CATEGORY_ID,
         c.NAME AS CATEGORY_NAME,
         w.TITLE AS WORK_TITLE,
@@ -379,12 +442,14 @@ function getRepostSelectSql(whereClause) {
         qp.USER_ID AS QUOTE_USER_ID,
         qu.USERNAME AS QUOTE_USERNAME,
         qu.NICKNAME AS QUOTE_NICKNAME,
+        qu.PROFILE_IMAGE_URL AS QUOTE_PROFILE_IMAGE_URL,
         qc.CATEGORY_ID AS QUOTE_CATEGORY_ID,
         qc.NAME AS QUOTE_CATEGORY_NAME,
         qw.TITLE AS QUOTE_WORK_TITLE,
         qp.PROGRESS AS QUOTE_PROGRESS,
         qp.CONTENT AS QUOTE_CONTENT,
         TO_CHAR(qp.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS QUOTE_CREATED_AT,
+        (SELECT LISTAGG(qpm.MEDIA_ID || ':' || qpm.MEDIA_TYPE || ':' || qpm.FILE_PATH, '|') WITHIN GROUP (ORDER BY qpm.ORDER_IDX) FROM POST_MEDIA qpm WHERE qpm.POST_ID = qp.POST_ID) AS QUOTE_MEDIA_FILES,
         TO_CHAR(p.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS CREATED_AT,
         'repost-' || r.REPOST_ID AS TIMELINE_ID,
         TO_CHAR(r.CREATED_AT, 'YYYY-MM-DD HH24:MI') AS TIMELINE_AT,
@@ -449,20 +514,30 @@ function buildRepostFilters({ categoryId, cursor, afterPostId, username, search,
   }
 
   if (search) {
-    filters.push(`(
-      LOWER(w.TITLE) LIKE :searchText
-      OR LOWER(w.ALIAS) LIKE :searchText
-      OR LOWER(u.USERNAME) LIKE :searchText
-      OR LOWER(u.NICKNAME) LIKE :searchText
-      OR LOWER(ru.USERNAME) LIKE :searchText
-      OR LOWER(ru.NICKNAME) LIKE :searchText
-      OR LOWER(p.CONTENT) LIKE :searchText
-      OR EXISTS (
+    const normalizedSearch = search.toLowerCase();
+
+    if (normalizedSearch.startsWith('#')) {
+      filters.push(`EXISTS (
         SELECT 1 FROM POST_TAG pt
-        WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) LIKE :searchText
-      )
-    )`);
-    binds.searchText = '%' + search.toLowerCase() + '%';
+        WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) = :tagSearch
+      )`);
+      binds.tagSearch = normalizedSearch.replace(/^#/, '').trim();
+    } else {
+      filters.push(`(
+        LOWER(w.TITLE) LIKE :searchText
+        OR LOWER(w.ALIAS) LIKE :searchText
+        OR LOWER(u.USERNAME) LIKE :searchText
+        OR LOWER(u.NICKNAME) LIKE :searchText
+        OR LOWER(ru.USERNAME) LIKE :searchText
+        OR LOWER(ru.NICKNAME) LIKE :searchText
+        OR LOWER(p.CONTENT) LIKE :searchText
+        OR EXISTS (
+          SELECT 1 FROM POST_TAG pt
+          WHERE pt.POST_ID = p.POST_ID AND LOWER(pt.TAG) LIKE :searchText
+        )
+      )`);
+      binds.searchText = '%' + normalizedSearch + '%';
+    }
   }
 
   if (afterPostId) {
@@ -715,11 +790,13 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
   const workTitle = normalizeText(req.body.workTitle, MAX_TITLE_LENGTH);
   const progress = normalizeText(req.body.progress, MAX_PROGRESS_LENGTH);
   let content = normalizeText(req.body.content, MAX_CONTENT_LENGTH);
-  const tags = extractTags(content, req.body.tags);
-  const isSpoiler = detectSpoiler(content, req.body.isSpoiler);
+  let tags = [];
+  let isSpoiler = 0;
+  let aiAnalysis = null;
   const quotePostId = normalizePositiveInteger(req.body.quotePostId);
   const mediaError = validateUploadedFiles(req.files);
   let connection;
+  let quotePostOwnerId = null;
 
   if (mediaError) {
     deleteUploadedFiles(req.files);
@@ -748,7 +825,7 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
     connection = await db.getConnection();
 
     const categoryCheck = await connection.execute(
-      'SELECT CATEGORY_ID FROM CATEGORY WHERE CATEGORY_ID = :categoryId',
+      'SELECT CATEGORY_ID, NAME FROM CATEGORY WHERE CATEGORY_ID = :categoryId',
       [categoryId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -763,7 +840,7 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
 
     if (quotePostId) {
       const quoteCheck = await connection.execute(
-        'SELECT POST_ID FROM POSTS WHERE POST_ID = :quotePostId AND IS_DELETED = 0',
+        'SELECT POST_ID, USER_ID FROM POSTS WHERE POST_ID = :quotePostId AND IS_DELETED = 0',
         [quotePostId],
         { outFormat: oracledb.OUT_FORMAT_OBJECT }
       );
@@ -775,7 +852,14 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
           message: '인용할 게시글이 존재하지 않습니다.',
         });
       }
+    
+      quotePostOwnerId = quoteCheck.rows[0].USER_ID;
     }
+
+    const categoryName = categoryCheck.rows[0].NAME || '';
+    aiAnalysis = await analyzePostContent({ categoryName, workTitle, progress, content });
+    isSpoiler = aiAnalysis.isSpoiler ? 1 : 0;
+    tags = extractTags(content, req.body.tags);
 
     const workId = await findOrCreateWork(connection, categoryId, workTitle);
     const inserted = await connection.execute(
@@ -864,7 +948,19 @@ router.post('/', jwtAuthentication, uploadMedia, async (req, res) => {
       );
     }
 
+    await saveAiAnalysisLog(connection, postId, aiAnalysis);
+
+    const noticeLookup = quotePostOwnerId ? await createNotice(connection, {
+      receiverId: quotePostOwnerId,
+      senderId: req.user.userId,
+      type: 'QUOTE',
+      targetType: 'POST',
+      targetId: postId,
+      allowDuplicate: true,
+    }) : null;
+
     await connection.commit();
+    await emitNoticeCreated(connection, noticeLookup);
     const post = await selectPostById(connection, postId, req.user.userId);
 
     return res.status(201).json({
@@ -1235,8 +1331,9 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
   const workTitle = normalizeText(req.body.workTitle, MAX_TITLE_LENGTH);
   const progress = normalizeText(req.body.progress, MAX_PROGRESS_LENGTH);
   const content = normalizeText(req.body.content, MAX_CONTENT_LENGTH);
-  const tags = extractTags(content, req.body.tags);
-  const isSpoiler = detectSpoiler(content, req.body.isSpoiler);
+  let tags = [];
+  let isSpoiler = 0;
+  let aiAnalysis = null;
   let connection;
 
   if (!postId) {
@@ -1265,7 +1362,7 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
     }
 
     const categoryCheck = await connection.execute(
-      'SELECT CATEGORY_ID FROM CATEGORY WHERE CATEGORY_ID = :categoryId',
+      'SELECT CATEGORY_ID, NAME FROM CATEGORY WHERE CATEGORY_ID = :categoryId',
       [categoryId],
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
     );
@@ -1273,6 +1370,11 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
     if (categoryCheck.rows.length === 0) {
       return res.status(400).json({ result: 'fail', message: '존재하지 않는 카테고리입니다.' });
     }
+
+    const categoryName = categoryCheck.rows[0].NAME || '';
+    aiAnalysis = await analyzePostContent({ categoryName, workTitle, progress, content });
+    isSpoiler = aiAnalysis.isSpoiler ? 1 : 0;
+    tags = extractTags(content, req.body.tags);
 
     const workId = await findOrCreateWork(connection, categoryId, workTitle);
 
@@ -1305,6 +1407,8 @@ router.patch('/:postId', jwtAuthentication, async (req, res) => {
         tags.map((tag) => ({ postId, tag }))
       );
     }
+
+    await saveAiAnalysisLog(connection, postId, aiAnalysis);
 
     await connection.commit();
     const post = await selectPostById(connection, postId, req.user.userId);

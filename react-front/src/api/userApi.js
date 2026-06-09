@@ -57,3 +57,29 @@ export function searchUsers({ keyword, limit } = {}) {
     query: { keyword, limit },
   });
 }
+export function getMySettings() {
+  return apiRequest('/users/me/settings', {
+    auth: true,
+  });
+}
+
+export function updateMySettings({ spoilerFilter }) {
+  return apiRequest('/users/me/settings', {
+    method: 'PATCH',
+    auth: true,
+    body: { spoilerFilter },
+  });
+}
+
+export function getBlockedUsers() {
+  return apiRequest('/users/me/blocks', {
+    auth: true,
+  });
+}
+
+export function unblockUser({ username }) {
+  return apiRequest('/users/me/blocks/' + encodeURIComponent(username), {
+    method: 'DELETE',
+    auth: true,
+  });
+}

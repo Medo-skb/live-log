@@ -1,4 +1,4 @@
-﻿const express = require('express');
+const express = require('express');
 const oracledb = require('oracledb');
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
@@ -109,7 +109,7 @@ async function getUserCategories(connection, userId) {
 async function findUserByEmail(connection, email) {
   const result = await connection.execute(
     `
-      SELECT USER_ID, USERNAME, NICKNAME, DISCRIMINATOR, PASSWORD_HASH, EMAIL, EMAIL_VERIFIED, ROLE
+      SELECT USER_ID, USERNAME, NICKNAME, DISCRIMINATOR, PASSWORD_HASH, EMAIL, EMAIL_VERIFIED, ROLE, PROFILE_IMAGE_URL, BANNER_IMAGE_URL
       FROM USERS
       WHERE EMAIL = :email
     `,
@@ -347,7 +347,7 @@ router.post('/login', async (req, res) => {
 
     const result = await connection.execute(
       `
-        SELECT USER_ID, USERNAME, NICKNAME, DISCRIMINATOR, PASSWORD_HASH, EMAIL, EMAIL_VERIFIED, ROLE
+        SELECT USER_ID, USERNAME, NICKNAME, DISCRIMINATOR, PASSWORD_HASH, EMAIL, EMAIL_VERIFIED, ROLE, PROFILE_IMAGE_URL, BANNER_IMAGE_URL
         FROM USERS
         WHERE USERNAME = :username
       `,
@@ -390,7 +390,9 @@ router.post('/login', async (req, res) => {
           email: user.EMAIL,
           nickname: user.NICKNAME,
           discriminator: user.DISCRIMINATOR,
-          role: user.ROLE || 'USER'
+          role: user.ROLE || 'USER',
+          profileImageUrl: user.PROFILE_IMAGE_URL || '',
+          bannerImageUrl: user.BANNER_IMAGE_URL || ''
         }
       });
     }
@@ -410,6 +412,8 @@ router.post('/login', async (req, res) => {
         nickname: user.NICKNAME,
         discriminator: user.DISCRIMINATOR,
         role: user.ROLE || 'USER',
+        profileImageUrl: user.PROFILE_IMAGE_URL || '',
+        bannerImageUrl: user.BANNER_IMAGE_URL || '',
         categories: userCategories
       }
     });
@@ -522,7 +526,10 @@ router.post('/google', async (req, res) => {
         NICKNAME: nickname,
         DISCRIMINATOR: discriminator,
         EMAIL: email,
-        EMAIL_VERIFIED: 1
+        EMAIL_VERIFIED: 1,
+        ROLE: 'USER',
+        PROFILE_IMAGE_URL: '',
+        BANNER_IMAGE_URL: ''
       };
     }
 
@@ -539,6 +546,9 @@ router.post('/google', async (req, res) => {
         email: user.EMAIL,
         nickname: user.NICKNAME,
         discriminator: user.DISCRIMINATOR,
+        role: user.ROLE || 'USER',
+        profileImageUrl: user.PROFILE_IMAGE_URL || '',
+        bannerImageUrl: user.BANNER_IMAGE_URL || '',
         categories: googleUserCategories
       }
     });

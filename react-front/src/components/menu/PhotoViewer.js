@@ -32,6 +32,7 @@ import {
 } from '../../api/postApi';
 import PostComposerDialog from '../post/PostComposerDialog';
 import { useAppModal } from '../common/ModalProvider';
+import { getTagSearchPath, getVisibleTags } from '../../utils/tagDisplay';
 
 const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || 'http://localhost:3010';
 const META_SEPARATOR = String.fromCharCode(183);
@@ -132,10 +133,12 @@ function PhotoViewer() {
   const [reactionLoadingKey, setReactionLoadingKey] = useState('');
   const [commentDraft, setCommentDraft] = useState('');
   const [commentSubmitting, setCommentSubmitting] = useState(false);
+  const [spoilerRevealed, setSpoilerRevealed] = useState(false);
 
   const menuOpen = Boolean(menuAnchorEl);
   const repostMenuOpen = Boolean(repostMenuAnchorEl);
   const mine = isMyPost(post, user);
+  const spoilerHidden = Boolean(post?.isSpoiler && !mine && !spoilerRevealed);
 
   useEffect(() => {
     let ignore = false;
@@ -353,7 +356,7 @@ function PhotoViewer() {
 
   return (
     <Box className="photo-viewer" component="main">
-      <Box className="photo-viewer__stage">
+      <Box className={spoilerHidden ? 'photo-viewer__stage photo-viewer__stage--spoiler-hidden' : 'photo-viewer__stage'}>
         <Button className="photo-viewer__back-control" onClick={handleBack} startIcon={<ArrowBackRoundedIcon />}>
           뒤로가기
         </Button>
@@ -367,6 +370,13 @@ function PhotoViewer() {
           </Box>
         ) : (
           <>
+            {spoilerHidden && (
+              <Box className="main-spoiler-gate photo-viewer__spoiler-gate">
+                <Typography className="main-spoiler-gate__title">스포일러가 포함된 사진입니다.</Typography>
+                <Typography className="main-spoiler-gate__message">이미지와 게시글 내용에 스포일러가 포함될 수 있습니다.</Typography>
+                <Button className="main-spoiler-gate__button" onClick={() => setSpoilerRevealed(true)}>사진 보기</Button>
+              </Box>
+            )}
             {canGoPrev && (
               <IconButton className="photo-viewer__nav photo-viewer__nav--prev" onClick={() => handleMovePhoto(currentIndex - 1)} aria-label="이전 사진">
                 <NavigateBeforeRoundedIcon />
@@ -404,11 +414,17 @@ function PhotoViewer() {
               </IconButton>
             </Box>
 
-            {String(post.content || '').trim() && <Typography className="photo-viewer__content">{post.content}</Typography>}
+            {spoilerHidden ? (
+              <Box className="main-spoiler-gate">
+                <Typography className="main-spoiler-gate__title">스포일러가 포함된 글입니다.</Typography>
+                <Typography className="main-spoiler-gate__message">태그와 본문에 스포일러가 포함될 수 있습니다.</Typography>
+                <Button className="main-spoiler-gate__button" onClick={() => setSpoilerRevealed(true)}>게시글 보기</Button>
+              </Box>
+            ) : String(post.content || '').trim() && <Typography className="photo-viewer__content">{post.content}</Typography>}
 
-            {post.tags?.length > 0 && (
+            {getVisibleTags(post).length > 0 && (
               <Stack className="photo-viewer__tags" direction="row" spacing={0.75} useFlexGap flexWrap="wrap">
-                {post.tags.map((tag) => <span className="main-tag" key={tag}>#{tag}</span>)}
+                {getVisibleTags(post).map((tag) => <button className="main-tag main-tag--button" key={tag} onClick={() => navigate(getTagSearchPath(tag))} type="button">#{tag}</button>)}
               </Stack>
             )}
 

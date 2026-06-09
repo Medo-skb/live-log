@@ -98,7 +98,9 @@ function mapRecommendedUserRow(row) {
     username: row.USERNAME,
     nickname: row.NICKNAME,
     tag: row.DISCRIMINATOR,
+    profileImageUrl: row.PROFILE_IMAGE_URL || '',
     followedByMe: row.FOLLOWED_BY_ME === 1,
+    role: row.ROLE || 'USER',
     counts: {
       posts: row.POST_COUNT || 0,
       followers: row.FOLLOWER_COUNT || 0,
@@ -148,6 +150,7 @@ async function findUserByUsername(connection, username, viewerId) {
         u.PROFILE_IMAGE_URL,
         u.BANNER_IMAGE_URL,
         u.ROLE,
+        u.SPOILER_FILTER,
         TO_CHAR(u.CREATED_AT, 'YYYY-MM-DD') AS CREATED_AT,
         (SELECT COUNT(*) FROM POSTS p WHERE p.USER_ID = u.USER_ID AND p.PARENT_POST_ID IS NULL AND p.IS_DELETED = 0) AS POST_COUNT,
         (SELECT COUNT(*) FROM FOLLOWS f WHERE f.FOLLOWING_ID = u.USER_ID) AS FOLLOWER_COUNT,
@@ -158,6 +161,7 @@ async function findUserByUsername(connection, username, viewerId) {
         ) THEN 1 ELSE 0 END AS FOLLOWED_BY_ME
       FROM USERS u
       WHERE u.USERNAME = :username
+        AND u.ROLE <> 'ADMIN'
     `,
     { username, viewerId },
     { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -175,6 +179,7 @@ async function findUserByUsername(connection, username, viewerId) {
     profileImageUrl: row.PROFILE_IMAGE_URL || '',
     bannerImageUrl: row.BANNER_IMAGE_URL || '',
     role: row.ROLE || 'USER',
+    spoilerFilter: row.SPOILER_FILTER === 0 ? 0 : 1,
     createdAt: row.CREATED_AT,
     isMe: Number(row.USER_ID) === Number(viewerId),
     followedByMe: row.FOLLOWED_BY_ME === 1,
@@ -202,6 +207,7 @@ router.get('/recommendations', jwtAuthentication, async (req, res) => {
             u.USERNAME,
             u.NICKNAME,
             u.DISCRIMINATOR,
+            u.PROFILE_IMAGE_URL,
             (SELECT COUNT(*) FROM POSTS p WHERE p.USER_ID = u.USER_ID AND p.PARENT_POST_ID IS NULL AND p.IS_DELETED = 0) AS POST_COUNT,
             (SELECT COUNT(*) FROM FOLLOWS f WHERE f.FOLLOWING_ID = u.USER_ID) AS FOLLOWER_COUNT,
             CASE WHEN EXISTS (
@@ -217,6 +223,7 @@ router.get('/recommendations', jwtAuthentication, async (req, res) => {
             ) AS MUTUAL_CATEGORY_COUNT
           FROM USERS u
           WHERE u.USER_ID <> :viewerId
+            AND u.ROLE <> 'ADMIN'
             AND NOT EXISTS (
               SELECT 1 FROM FOLLOWS f
               WHERE f.FOLLOWER_ID = :viewerId AND f.FOLLOWING_ID = u.USER_ID
@@ -266,6 +273,7 @@ router.get('/search', jwtAuthentication, async (req, res) => {
             u.USERNAME,
             u.NICKNAME,
             u.DISCRIMINATOR,
+            u.PROFILE_IMAGE_URL,
             (SELECT COUNT(*) FROM POSTS p WHERE p.USER_ID = u.USER_ID AND p.PARENT_POST_ID IS NULL AND p.IS_DELETED = 0) AS POST_COUNT,
             (SELECT COUNT(*) FROM FOLLOWS f WHERE f.FOLLOWING_ID = u.USER_ID) AS FOLLOWER_COUNT,
             CASE WHEN EXISTS (
@@ -281,6 +289,7 @@ router.get('/search', jwtAuthentication, async (req, res) => {
             ) AS MUTUAL_CATEGORY_COUNT
           FROM USERS u
           WHERE u.USER_ID <> :viewerId
+            AND u.ROLE <> 'ADMIN'
             AND (
               LOWER(u.USERNAME) LIKE LOWER(:searchKeyword)
               OR LOWER(u.NICKNAME) LIKE LOWER(:searchKeyword)
@@ -326,6 +335,150 @@ router.get('/search', jwtAuthentication, async (req, res) => {
   }
 });
 
+router.get('/me/settings', jwtAuthentication, async (req, res) => {
+  let connection;
+
+  try {
+    connection = await db.getConnection();
+
+    const result = await connection.execute(
+      `
+        SELECT USER_ID, USERNAME, NICKNAME, SPOILER_FILTER
+        FROM USERS
+        WHERE USER_ID = :userId
+      `,
+      { userId: req.user.userId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ result: 'fail', message: '사용자 정보를 찾을 수 없습니다.' });
+    }
+
+    const row = result.rows[0];
+    return res.json({
+      result: 'success',
+      settings: {
+        username: row.USERNAME,
+        nickname: row.NICKNAME,
+        spoilerFilter: row.SPOILER_FILTER === 0 ? 0 : 1,
+      },
+    });
+  } catch (error) {
+    console.error('User settings load error', error);
+    return res.status(500).json({ result: 'fail', message: '설정을 불러오는 중 오류가 발생했습니다.' });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+router.patch('/me/settings', jwtAuthentication, async (req, res) => {
+  const spoilerFilter = Number(req.body.spoilerFilter) === 0 ? 0 : 1;
+  let connection;
+
+  try {
+    connection = await db.getConnection();
+
+    await connection.execute(
+      'UPDATE USERS SET SPOILER_FILTER = :spoilerFilter WHERE USER_ID = :userId',
+      { spoilerFilter, userId: req.user.userId }
+    );
+    await connection.commit();
+
+    return res.json({
+      result: 'success',
+      message: '콘텐츠 설정이 저장되었습니다.',
+      settings: { spoilerFilter },
+    });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error('User settings update error', error);
+    return res.status(500).json({ result: 'fail', message: '설정 저장 중 오류가 발생했습니다.' });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+router.get('/me/blocks', jwtAuthentication, async (req, res) => {
+  let connection;
+
+  try {
+    connection = await db.getConnection();
+
+    const result = await connection.execute(
+      `
+        SELECT
+          u.USER_ID,
+          u.USERNAME,
+          u.NICKNAME,
+          u.DISCRIMINATOR,
+          u.PROFILE_IMAGE_URL,
+          ub.CREATED_AT
+        FROM USER_BLOCK ub
+        JOIN USERS u ON u.USER_ID = ub.BLOCKED_ID
+        WHERE ub.BLOCKER_ID = :viewerId
+          AND u.ROLE <> 'ADMIN'
+        ORDER BY ub.CREATED_AT DESC
+      `,
+      { viewerId: req.user.userId },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    return res.json({
+      result: 'success',
+      users: result.rows.map((row) => ({
+        userId: row.USER_ID,
+        username: row.USERNAME,
+        nickname: row.NICKNAME,
+        tag: row.DISCRIMINATOR,
+        profileImageUrl: row.PROFILE_IMAGE_URL || '',
+        blockedAt: row.CREATED_AT,
+      })),
+    });
+  } catch (error) {
+    console.error('Blocked user load error', error);
+    return res.status(500).json({ result: 'fail', message: '차단 목록을 불러오는 중 오류가 발생했습니다.' });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
+
+router.delete('/me/blocks/:username', jwtAuthentication, async (req, res) => {
+  const username = normalizeUsername(req.params.username);
+  let connection;
+
+  if (!username) {
+    return res.status(400).json({ result: 'fail', message: '사용자 정보가 올바르지 않습니다.' });
+  }
+
+  try {
+    connection = await db.getConnection();
+
+    const target = await connection.execute(
+      "SELECT USER_ID, USERNAME, NICKNAME, DISCRIMINATOR FROM USERS WHERE USERNAME = :username AND ROLE <> 'ADMIN'",
+      { username },
+      { outFormat: oracledb.OUT_FORMAT_OBJECT }
+    );
+
+    if (target.rows.length === 0) {
+      return res.status(404).json({ result: 'fail', message: '존재하지 않는 사용자입니다.' });
+    }
+
+    await connection.execute(
+      'DELETE FROM USER_BLOCK WHERE BLOCKER_ID = :viewerId AND BLOCKED_ID = :blockedId',
+      { viewerId: req.user.userId, blockedId: target.rows[0].USER_ID }
+    );
+    await connection.commit();
+
+    return res.json({ result: 'success', message: '차단을 해제했습니다.' });
+  } catch (error) {
+    if (connection) await connection.rollback();
+    console.error('Blocked user delete error', error);
+    return res.status(500).json({ result: 'fail', message: '차단 해제 중 오류가 발생했습니다.' });
+  } finally {
+    if (connection) await connection.close();
+  }
+});
 router.get('/:username', jwtAuthentication, async (req, res) => {
   const username = normalizeUsername(req.params.username);
   let connection;
@@ -432,6 +585,10 @@ router.post('/:username/follow', jwtAuthentication, async (req, res) => {
       return res.status(400).json({ result: 'fail', message: '본인은 팔로우할 수 없습니다.' });
     }
 
+    if (String(profile.role || '').toUpperCase() === 'ADMIN') {
+      return res.status(403).json({ result: 'fail', message: '관리자 계정은 팔로우할 수 없습니다.' });
+    }
+
     const found = await connection.execute(
       'SELECT FOLLOWER_ID FROM FOLLOWS WHERE FOLLOWER_ID = :viewerId AND FOLLOWING_ID = :targetUserId',
       { viewerId: req.user.userId, targetUserId: profile.userId },
@@ -507,11 +664,11 @@ router.get('/:username/:type', jwtAuthentication, async (req, res) => {
 
     const result = await connection.execute(
               'SELECT ' +
-        'u.USER_ID, u.USERNAME, u.NICKNAME, u.DISCRIMINATOR, ' +
+        'u.USER_ID, u.USERNAME, u.NICKNAME, u.DISCRIMINATOR, u.PROFILE_IMAGE_URL, ' +
         'CASE WHEN EXISTS (SELECT 1 FROM FOLLOWS viewer_follow WHERE viewer_follow.FOLLOWER_ID = :viewerId AND viewer_follow.FOLLOWING_ID = u.USER_ID) THEN 1 ELSE 0 END AS FOLLOWED_BY_ME ' +
         'FROM FOLLOWS f ' +
         'JOIN USERS u ON ' + joinCondition + ' ' +
-        'WHERE ' + ownerCondition + ' ' +
+        'WHERE ' + ownerCondition + " AND u.ROLE <> 'ADMIN' " +
         'ORDER BY f.CREATED_AT DESC',
       { targetUserId: profile.userId, viewerId: req.user.userId },
       { outFormat: oracledb.OUT_FORMAT_OBJECT }
@@ -522,6 +679,7 @@ router.get('/:username/:type', jwtAuthentication, async (req, res) => {
       username: row.USERNAME,
       nickname: row.NICKNAME,
       tag: row.DISCRIMINATOR,
+      profileImageUrl: row.PROFILE_IMAGE_URL || '',
       followedByMe: row.FOLLOWED_BY_ME === 1,
     }));
 
