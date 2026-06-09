@@ -136,6 +136,14 @@
 
 ---
 
+| 분류 | 링크 |
+|------|------|
+| 설계 자료 | [설계](https://drive.google.com/drive/folders/1WOBUMVhwTjuqBp9mdeAeudQ6Q8EI2Drc) |
+| PPT | [PPT](https://drive.google.com/drive/folders/1-J_0L1INgf3XvadntiJVhX3gPk-q2slK) |
+| 영상 자료 | [영상](https://drive.google.com/drive/folders/1rLSSIqisp60ILiWIn55bvf0NuO6Zdk7-) |
+
+---
+
 ## 프로젝트 구조
 
 ```text
