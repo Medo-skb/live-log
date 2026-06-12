@@ -1,5 +1,17 @@
 # Live-Log - 실시간 중계 SNS
 
+<div align="center">
+  <img src="docs/images/01-main-feed.png" width="900" alt="Live-Log 메인 피드">
+</div>
+
+<br>
+
+| 게시물 작성 | AI 스포일러 필터 | 실시간 채팅 |
+|---|---|---|
+| <img src="docs/images/02-post-compose.png" width="100%" alt="게시물 작성"> | <img src="docs/images/03-spoiler-filter.png" width="100%" alt="스포일러 필터"> | <img src="docs/images/08-chat.png" width="100%" alt="실시간 채팅"> |
+
+> 작품명과 현재 진도를 중심으로 감상을 기록하고 실시간으로 공유하는 SNS
+
 ## 프로젝트 소개
 
 **Live-Log**는 영화, 드라마, 소설, 웹툰, 만화, 애니메이션, 공연, 게임을 감상하면서  
@@ -18,6 +30,18 @@
 - Socket.IO 기반 실시간 알림 및 1:1 채팅
 - Gemini 기반 스포일러 자동 판별
 - 신고 게시물 처리를 위한 관리자 전용 페이지
+
+---
+
+## 목차
+
+- [프로젝트 소개](#프로젝트-소개)
+- [프로젝트 기간](#프로젝트-기간)
+- [개발 인원](#개발-인원)
+- [사용 기술](#사용-기술)
+- [주요 기능](#주요-기능)
+- [프로젝트 구조](#프로젝트-구조)
+- [향후 개선 사항](#향후-개선-사항)
 
 ---
 
@@ -78,12 +102,17 @@
 - 커서 기반 무한 스크롤과 새 게시물 갱신
 - 고정 사이드바 및 라이트·다크 모드 지원
 
+<img src="docs/images/01-main-feed.png" width="100%" alt="Live-Log 메인 피드">
+
 ### 게시물
 
 - 카테고리, 작품명, 진도, 내용, 태그 기반 게시물 작성
 - 게시물 등록, 조회, 수정 및 소프트 삭제
 - 댓글, 인용, 리포스트를 통한 상호작용
 - 좋아요, 북마크, URL 복사 및 신고
+
+<img src="docs/images/02-post-compose.png" width="100%" alt="게시물 작성 화면">
+<img src="docs/images/04-post-detail.png" width="100%" alt="게시물 상세 화면">
 
 ### 미디어
 
@@ -92,12 +121,18 @@
 - 원본 비율을 고려한 피드 미디어 표시
 - 고유 주소와 상호작용 기능을 제공하는 미디어 뷰어
 
+<img src="docs/images/05-media-viewer.png" width="100%" alt="미디어 뷰어">
+
 ### AI 스포일러 필터
 
 - 게시물 등록 및 수정 시 Gemini API 자동 분석
 - 작품 정보와 본문을 기반으로 스포일러 여부 저장
 - 다른 사용자의 스포일러 게시물 전체 내용 숨김
 - 사용자 선택 시 게시물 공개 및 필터 설정 지원
+
+| 스포일러 숨김 | 게시물 공개 |
+|---|---|
+| <img src="docs/images/03-spoiler-filter.png" width="100%" alt="스포일러 숨김"> | <img src="docs/images/03-spoiler-revealed.png" width="100%" alt="스포일러 공개"> |
 
 ### 프로필 및 소셜
 
@@ -106,12 +141,16 @@
 - 팔로우, 팔로워·팔로잉 목록 및 사용자 추천
 - 사용자 차단과 프로필에서 DM 시작
 
+<img src="docs/images/06-profile.png" width="100%" alt="사용자 프로필">
+
 ### 검색
 
 - 작품명, 본문, 사용자, 태그 통합 검색
 - 검색어 및 사용자 자동완성
 - `#` 기반 태그 검색과 태그 피드 이동
 - 게시물 언급량 기반 인기 태그 제공
+
+<img src="docs/images/07-search.png" width="100%" alt="통합 검색">
 
 ### 실시간 알림
 
@@ -120,6 +159,8 @@
 - 읽지 않은 알림 수와 개별·전체 읽음 처리
 - 알림에서 관련 게시물 또는 프로필로 이동
 
+<img src="docs/images/09-notifications.png" width="100%" alt="실시간 알림">
+
 ### 1:1 채팅
 
 - Socket.IO 기반 실시간 1:1 메시지
@@ -127,12 +168,16 @@
 - 읽지 않은 대화 필터 및 쪽지 보관함
 - 메시지 읽음·삭제와 차단 관계 전송 제한
 
+<img src="docs/images/08-chat.png" width="100%" alt="실시간 채팅">
+
 ### 관리자
 
 - 관리자 로그인 시 전용 관리 페이지로 이동
 - JWT와 역할 검증을 통한 관리자 API 보호
 - 게시물 신고 조회, 승인 및 반려
 - 승인된 신고 게시물 소프트 삭제와 처리 기록 저장
+
+<img src="docs/images/10-admin.png" width="100%" alt="관리자 신고 관리">
 
 ---
 

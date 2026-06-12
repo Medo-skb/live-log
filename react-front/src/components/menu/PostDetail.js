@@ -604,7 +604,7 @@ function PostDetail() {
           <Stack className="post-detail-comment-list">
             {comments.map((comment) => (
               <Box className="post-detail-comment" key={comment.postId}>
-                <Avatar className="main-avatar main-avatar--comment">{comment.user.nickname.charAt(0)}</Avatar>
+                <Avatar className="main-avatar main-avatar--comment" src={resolveMediaUrl(comment.user.profileImageUrl || comment.user.profileImage)}>{comment.user.nickname.charAt(0)}</Avatar>
                 <Box className="post-detail-comment__body">
                   <Box className="main-comment__meta-row">
                     <Typography className="main-comment__name">{comment.user.nickname}</Typography>

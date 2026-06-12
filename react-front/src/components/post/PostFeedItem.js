@@ -468,7 +468,7 @@ function PostFeedItem({ isDarkMode = false, onDeleted, onOpen, post, showActions
         {commentOpen && (
           <Box className="main-comment-panel" onClick={stopActionClick}>
             <Box className="main-comment-compose">
-              <Avatar className="main-avatar main-avatar--comment">{getInitial(viewer?.nickname, viewer?.username)}</Avatar>
+              <Avatar className="main-avatar main-avatar--comment" src={resolveMediaUrl(viewer?.profileImageUrl || viewer?.profileImage)}>{getInitial(viewer?.nickname, viewer?.username)}</Avatar>
               <TextField className="main-comment-input" fullWidth inputRef={replyInputRef} minRows={2} multiline onChange={(event) => setCommentDraft(event.target.value.slice(0, 4000))} placeholder={copy.commentPlaceholder} value={commentDraft} />
               <Button className="main-comment-submit" disabled={!commentDraft.trim() || commentSubmitting} onClick={handleSubmitComment} variant="contained">{commentSubmitting ? copy.commentSubmitting : copy.commentSubmit}</Button>
             </Box>
@@ -478,7 +478,7 @@ function PostFeedItem({ isDarkMode = false, onDeleted, onOpen, post, showActions
               <Stack className="main-comment-list">
                 {comments.map((comment) => (
                   <Box className="main-comment" key={comment.postId}>
-                    <Avatar className="main-avatar main-avatar--comment">{getInitial(comment.user?.nickname, comment.user?.username)}</Avatar>
+                    <Avatar className="main-avatar main-avatar--comment" src={resolveMediaUrl(comment.user?.profileImageUrl || comment.user?.profileImage)}>{getInitial(comment.user?.nickname, comment.user?.username)}</Avatar>
                     <Box className="main-comment__body">
                       <Box className="main-comment__meta-row">
                         <Typography className="main-comment__name">{comment.user?.nickname || comment.user?.username}</Typography>
